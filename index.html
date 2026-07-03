@@ -4895,6 +4895,55 @@ function renderAuthPage() {
   '</div>';
 }
 
+function onAuthSuccess(u) {
+  if (!u) return;
+  state.user = u;
+  render();
+  FB._checkRules();
+
+  // ── Posts reais do Firestore ──────────────────────────
+  FB.loadPosts().then(function(){ render(); }).catch(function(){});
+  // (loadPosts só substitui se houver posts no Firestore)
+
+  // ── Stories reais do Firestore (evita que somam ao recarregar) ─
+  FB.loadStories().then(function(){ render(); }).catch(function(){});
+
+  // ── Conversas ────────────────────────────────────────
+  FB.loadConvos().then(function(){ render(); checkOnlineStatus(CONVOS); }).catch(function(){});
+
+  // ── Presença ─────────────────────────────────────────
+  startPresence();
+  startStoryPolling();
+
+  // ── Notificações reais (substitui as demo) ────────────
+  FB.loadNotifs().then(function(docs) {
+    NOTIFS.length = 0; // limpa demos
+    docs.forEach(function(doc) {
+      NOTIFS.push({
+        id: uid(), _fsId: doc._id,
+        type: doc.type || "like",
+        userId: doc.fromUid || "",
+        _fromName: doc.fromName || "",
+        _fromAvatar: doc.fromAvatar || "",
+        text: doc.text || "",
+        time: doc.createdAt ? _relTime(doc.createdAt) : "antes",
+        read: !!doc.read,
+      });
+      if (doc.fromUid && !USERS[doc.fromUid] && doc.fromName) {
+        USERS[doc.fromUid] = {
+          uid: doc.fromUid, name: doc.fromName,
+          username: "@" + doc.fromName.toLowerCase().replace(/\s+/g,""),
+          avatar: doc.fromAvatar || "https://api.dicebear.com/7.x/avataaars/svg?seed="+doc.fromUid,
+          verified:false, followers:[], following:[],
+        };
+      }
+    });
+    _lastNotifCheck = new Date().toISOString();
+    render();
+  }).catch(function(){});
+  startNotifPolling();
+}
+
 function bindAuthPage() {
   appEl.querySelectorAll("[data-mode]").forEach(function(btn) {
     btn.addEventListener("click", function() { authMode = btn.getAttribute("data-mode"); render(); });
@@ -4924,53 +4973,7 @@ function bindAuthPage() {
       ? FB.login(email, pw)
       : FB.register(email, pw, name);
     p.then(function(u) {
-      if (u) {
-        state.user = u;
-        render();
-        FB._checkRules();
-
-        // ── Posts reais do Firestore ──────────────────────────
-        FB.loadPosts().then(function(){ render(); }).catch(function(){});
-        // (loadPosts só substitui se houver posts no Firestore)
-
-        // ── Stories reais do Firestore (evita que somam ao recarregar) ─
-        FB.loadStories().then(function(){ render(); }).catch(function(){});
-
-        // ── Conversas ────────────────────────────────────────
-        FB.loadConvos().then(function(){ render(); checkOnlineStatus(CONVOS); }).catch(function(){});
-
-        // ── Presença ─────────────────────────────────────────
-        startPresence();
-        startStoryPolling();
-
-        // ── Notificações reais (substitui as demo) ────────────
-        FB.loadNotifs().then(function(docs) {
-          NOTIFS.length = 0; // limpa demos
-          docs.forEach(function(doc) {
-            NOTIFS.push({
-              id: uid(), _fsId: doc._id,
-              type: doc.type || "like",
-              userId: doc.fromUid || "",
-              _fromName: doc.fromName || "",
-              _fromAvatar: doc.fromAvatar || "",
-              text: doc.text || "",
-              time: doc.createdAt ? _relTime(doc.createdAt) : "antes",
-              read: !!doc.read,
-            });
-            if (doc.fromUid && !USERS[doc.fromUid] && doc.fromName) {
-              USERS[doc.fromUid] = {
-                uid: doc.fromUid, name: doc.fromName,
-                username: "@" + doc.fromName.toLowerCase().replace(/\s+/g,""),
-                avatar: doc.fromAvatar || "https://api.dicebear.com/7.x/avataaars/svg?seed="+doc.fromUid,
-                verified:false, followers:[], following:[],
-              };
-            }
-          });
-          _lastNotifCheck = new Date().toISOString();
-          render();
-        }).catch(function(){});
-        startNotifPolling();
-      }
+      onAuthSuccess(u);
     }).catch(function() {
       submitBtn.textContent = authMode === "login" ? "Entrar" : "Criar conta";
       submitBtn.disabled = false;
@@ -4979,7 +4982,9 @@ function bindAuthPage() {
   });
   var googleBtn = appEl.querySelector("[data-google-auth]");
   if (googleBtn) googleBtn.addEventListener("click", function() {
-    FB.loginGoogle().catch(function(){});
+    FB.loginGoogle().then(function(u) {
+      onAuthSuccess(u);
+    }).catch(function(){});
   });
 
   // "Esqueceu a senha?"
