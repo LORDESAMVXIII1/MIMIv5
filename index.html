@@ -967,7 +967,7 @@ var FB = {
 
   loginGoogle: function() {
     return new Promise(function(resolve, reject) {
-      if (typeof google === "undefined" || !google.accounts || !google.accounts.id) {
+      if (typeof google === "undefined" || !google.accounts || !google.accounts.oauth2) {
         showToast("Login com Google indisponível (script não carregou). Verifique sua conexão.");
         reject("gis-not-loaded");
         return;
@@ -978,15 +978,20 @@ var FB = {
         return;
       }
 
-      google.accounts.id.initialize({
+      var tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: CFG.googleClientId,
-        callback: function(response) {
-          // response.credential = JWT do Google (id_token)
+        scope: "openid email profile",
+        callback: function(tokenResponse) {
+          if (!tokenResponse || tokenResponse.error) {
+            showToast("Login com Google foi cancelado ou falhou.");
+            reject(tokenResponse && tokenResponse.error);
+            return;
+          }
           fetch(FIRE_AUTH + ":signInWithIdp?key=" + CFG.apiKey, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              postBody: "id_token=" + response.credential + "&providerId=google.com",
+              postBody: "access_token=" + tokenResponse.access_token + "&providerId=google.com",
               requestUri: window.location.origin || window.location.href,
               returnSecureToken: true
             })
@@ -1008,16 +1013,15 @@ var FB = {
             showToast("Erro de rede no login Google.");
             reject(err);
           });
+        },
+        error_callback: function(err) {
+          showToast("Login com Google foi bloqueado ou cancelado (verifique bloqueador de pop-up).");
+          reject(err);
         }
       });
 
-      // Exibe o seletor de conta do Google (One Tap / popup)
-      google.accounts.id.prompt(function(notification) {
-        if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
-          showToast("Login com Google foi bloqueado ou cancelado. Se estiver no app instalado (APK), abra o link no Chrome para usar o Google.");
-          reject("prompt-not-shown");
-        }
-      });
+      // Abre o popup de login do Google diretamente (acionado pelo clique do usuário)
+      tokenClient.requestAccessToken();
     });
   },
 
