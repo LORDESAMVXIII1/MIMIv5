@@ -744,6 +744,7 @@
   .call-ctrl-btn { width:58px; height:58px; border-radius:50%; border:none; display:flex; align-items:center; justify-content:center; cursor:pointer; background:rgba(255,255,255,.15); color:#fff; }
   .call-ctrl-btn.active { background:#fff; color:#2a1a30; }
   .call-end-btn { width:64px; height:64px; border-radius:50%; border:none; background:#e0507a; color:#fff; display:flex; align-items:center; justify-content:center; cursor:pointer; transform:rotate(135deg); }
+  .call-accept-btn { background:#3fc06a; transform:rotate(0deg); animation:pulse 1.4s infinite; }
 
   .toast { position:fixed; bottom:calc(80px + env(safe-area-inset-bottom)); left:50%; transform:translateX(-50%); background:rgba(74,59,69,.92); color:#fff; padding:10px 18px; border-radius:20px; font-size:13px; font-weight:600; z-index:500; max-width:85%; text-align:center; pointer-events:none; }
 
@@ -4012,6 +4013,21 @@ var state = {
 var compose = { media:null, mediaType:null, loc:null };
 var activeCall = null;
 var callTimerInterval = null;
+
+// ─── CHAMADA DE VOZ REAL (WebRTC) ──────────────────────────────
+var incomingCall = null;          // { callId, callerId, convId, offerSdp } — tela de "recebendo chamada"
+var _rtcPeer = null;              // RTCPeerConnection ativa
+var _localCallStream = null;      // MediaStream do microfone local
+var _remoteAudioEl = null;        // <audio> escondido pra tocar o áudio remoto
+var _callRole = null;             // "caller" | "callee"
+var _callStatusPollInterval = null; // poll no doc da chamada ativa (aceita/recusa/encerra)
+var _callRingPollInterval = null;   // poll global esperando chamadas recebidas
+var _callRingTimeout = null;        // timeout de "sem resposta" pra quem está ligando
+var _handledCallIds = {};           // callIds já tratados (evita reabrir chamada recusada/encerrada)
+var RTC_CONFIG = { iceServers: [
+  { urls: "stun:stun.l.google.com:19302" },
+  { urls: "stun:stun1.l.google.com:19302" }
+] };
 var _typingTimeout = null;
 var _isTyping = false;
 
@@ -4196,6 +4212,7 @@ function render() {
   if (state.viewingStoryIdx !== null) html += renderStoryViewer();
   if (state.photoViewerUrl) html += renderPhotoViewer();
   if (activeCall) html += renderCallScreen();
+  if (incomingCall) html += renderIncomingCallScreen();
   if (state.actionSheetPostId) html += renderActionSheet();
   if (state.profileSheetUserId) html += renderProfileSheet();
   if (state.confirmDialog) html += renderConfirmDialog();
@@ -4237,6 +4254,7 @@ function render() {
   if (state.viewingStoryIdx !== null) bindStoryViewer();
   if (state.photoViewerUrl) bindPhotoViewer();
   if (activeCall) bindCallScreen();
+  if (incomingCall) bindIncomingCallScreen();
   if (state.actionSheetPostId) bindActionSheet();
   if (state.profileSheetUserId) bindProfileSheet();
   if (state.confirmDialog) bindConfirmDialog();
@@ -5004,7 +5022,7 @@ function hasOpenOverlay() {
   return !!(
     state.followListFor || state.publishMenu || state.creating ||
     state.editProfileOpen || state.subsOpen || state.viewingStoryIdx !== null ||
-    activeCall || state.actionSheetPostId || state.profileSheetUserId ||
+    activeCall || incomingCall || state.actionSheetPostId || state.profileSheetUserId ||
     state.confirmDialog || state.paywallDialog || state.addBooksSheetOpen || state.bookPicker ||
     state.isbnScanOpen || state.bookAddDraft || state.bookActionFor ||
     document.querySelector("[data-story-comments-panel]")
@@ -7749,18 +7767,36 @@ function hideRecordingUI() {
   if (indicator) indicator.remove();
 }
 
-// ─── CALLS (simulated) ────────────────────────────────────────
+// ─── CALLS ──────────────────────────────────────────────────────
+// Chamada de VÍDEO continua simulada (fora do escopo por enquanto).
+// Chamada de VOZ ("audio") é real: WebRTC com sinalização via Firestore
+// (coleção "calls"), sem servidor TURN — funciona na maioria das redes
+// (wifi / 4G-5G comuns), mas pode falhar em NAT muito restritivo/corporativo
+// por não haver um relay de mídia.
 function startCall(type) {
   var conv = CONVOS.find(function(c){ return c.id === state.activeConvoId; });
   if (!conv) return;
-  activeCall = { conv:conv, type:type, status:"calling", seconds:0, muted:false };
-  render();
-  setTimeout(function() {
-    if (!activeCall) return;
-    activeCall.status = "connected";
+  if (activeCall || incomingCall) { showToast("Você já está em uma chamada."); return; }
+
+  if (type !== "audio") {
+    // Chamada de vídeo: mantém o fluxo simulado original.
+    activeCall = { conv:conv, type:type, status:"calling", seconds:0, muted:false, simulated:true };
     render();
-    startCallTimer();
-  }, 1800);
+    setTimeout(function() {
+      if (!activeCall) return;
+      activeCall.status = "connected";
+      render();
+      startCallTimer();
+    }, 1800);
+    return;
+  }
+
+  startRealVoiceCall(conv);
+}
+
+function formatCallTime(s) {
+  var mm = Math.floor(s/60), ss = String(s%60).padStart(2,"0");
+  return String(mm).padStart(2,"0")+":"+ss;
 }
 
 function startCallTimer() {
@@ -7773,9 +7809,261 @@ function startCallTimer() {
   }, 1000);
 }
 
-function formatCallTime(s) {
-  var mm = Math.floor(s/60), ss = String(s%60).padStart(2,"0");
-  return String(mm).padStart(2,"0")+":"+ss;
+// Espera o ICE gathering terminar antes de mandar o SDP — assim o
+// offer/answer já viaja com todos os candidatos, e não precisamos ficar
+// trocando candidatos avulsos via polling (o Firestore REST aqui não é
+// realtime, então "trickle ICE" seria bem mais complicado de sincronizar).
+function _waitIceGatheringComplete(peer) {
+  if (peer.iceGatheringState === "complete") return Promise.resolve();
+  return new Promise(function(resolve) {
+    var done = false;
+    function finish() { if (done) return; done = true; peer.removeEventListener("icegatheringstatechange", check); resolve(); }
+    function check() { if (peer.iceGatheringState === "complete") finish(); }
+    peer.addEventListener("icegatheringstatechange", check);
+    setTimeout(finish, 3000); // segurança: nunca trava mais que 3s esperando candidatos
+  });
+}
+
+function _playRemoteStream(stream) {
+  if (!_remoteAudioEl) {
+    _remoteAudioEl = document.createElement("audio");
+    _remoteAudioEl.setAttribute("autoplay", "");
+    _remoteAudioEl.setAttribute("playsinline", "");
+    _remoteAudioEl.style.display = "none";
+    document.body.appendChild(_remoteAudioEl);
+  }
+  _remoteAudioEl.srcObject = stream;
+  _remoteAudioEl.play().catch(function(){});
+}
+
+function _cleanupCallResources() {
+  clearInterval(callTimerInterval);
+  clearInterval(_callStatusPollInterval);
+  clearTimeout(_callRingTimeout);
+  _callStatusPollInterval = null;
+  _callRingTimeout = null;
+  if (_rtcPeer) { try { _rtcPeer.close(); } catch(e){} _rtcPeer = null; }
+  if (_localCallStream) { try { _localCallStream.getTracks().forEach(function(t){ t.stop(); }); } catch(e){} _localCallStream = null; }
+  if (_remoteAudioEl) { try { _remoteAudioEl.srcObject = null; _remoteAudioEl.remove(); } catch(e){} _remoteAudioEl = null; }
+  _callRole = null;
+}
+
+// ── QUEM LIGA ──────────────────────────────────────────────────
+function startRealVoiceCall(conv) {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showToast("Seu navegador não permite chamadas de voz.");
+    return;
+  }
+  activeCall = { conv:conv, type:"audio", status:"calling", seconds:0, muted:false, simulated:false, callId:null };
+  _callRole = "caller";
+  render();
+
+  navigator.mediaDevices.getUserMedia({ audio:true })
+    .then(function(stream) {
+      _localCallStream = stream;
+      _rtcPeer = new RTCPeerConnection(RTC_CONFIG);
+      stream.getTracks().forEach(function(t){ _rtcPeer.addTrack(t, stream); });
+      _rtcPeer.ontrack = function(ev) { _playRemoteStream(ev.streams[0]); };
+      return _rtcPeer.createOffer();
+    })
+    .then(function(offer) { return _rtcPeer.setLocalDescription(offer); })
+    .then(function() { return _waitIceGatheringComplete(_rtcPeer); })
+    .then(function() {
+      var callId = uid();
+      var data = {
+        callerId: ME_ID, calleeId: conv.userId, convId: conv.id, type: "audio",
+        offerSdp: _rtcPeer.localDescription.sdp,
+        status: "ringing",
+        createdAt: new Date().toISOString()
+      };
+      return fsSet("calls/"+callId, data).then(function() {
+        if (!activeCall) return; // usuário já cancelou enquanto preparava
+        activeCall.callId = callId;
+        _startCallerStatusPoll(callId);
+        _callRingTimeout = setTimeout(function() {
+          if (activeCall && activeCall.status === "calling" && activeCall.callId === callId) {
+            fsSet("calls/"+callId, { status:"missed" }, true).catch(function(){});
+            showToast("Sem resposta.");
+            endCall();
+          }
+        }, 35000);
+      });
+    })
+    .catch(function(err) {
+      console.error("Erro ao iniciar chamada de voz:", err);
+      if (err && err.name === "NotAllowedError") {
+        showToast("Permissão de microfone negada. Ative o microfone pro navegador pra ligar.");
+      } else {
+        showToast("Não foi possível iniciar a chamada.");
+      }
+      _cleanupCallResources();
+      activeCall = null;
+      render();
+    });
+}
+
+function _startCallerStatusPoll(callId) {
+  clearInterval(_callStatusPollInterval);
+  _callStatusPollInterval = setInterval(function() {
+    if (!activeCall || activeCall.callId !== callId) { clearInterval(_callStatusPollInterval); return; }
+    fsGet("calls/"+callId).then(function(doc) {
+      if (!activeCall || activeCall.callId !== callId) return;
+      if (!doc) { showToast("A chamada foi encerrada."); endCall(); return; }
+      if (doc.status === "accepted" && doc.answerSdp && _rtcPeer && !_rtcPeer.currentRemoteDescription) {
+        clearInterval(_callStatusPollInterval);
+        clearTimeout(_callRingTimeout);
+        _rtcPeer.setRemoteDescription({ type:"answer", sdp:doc.answerSdp }).then(function() {
+          if (!activeCall) return;
+          activeCall.status = "connected";
+          render();
+          startCallTimer();
+          _startCallEndWatcher(callId);
+        }).catch(function(err) {
+          console.error("Erro ao conectar áudio:", err);
+          showToast("Falha ao conectar a chamada.");
+          endCall();
+        });
+      } else if (doc.status === "declined") {
+        clearInterval(_callStatusPollInterval);
+        showToast("Chamada recusada.");
+        endCall();
+      } else if (doc.status === "ended") {
+        clearInterval(_callStatusPollInterval);
+        endCall();
+      }
+    }).catch(function(){});
+  }, 1500);
+}
+
+// Enquanto a chamada está conectada, cada lado fica de olho no doc pra
+// perceber quando o outro lado encerra (já que não temos push realtime).
+function _startCallEndWatcher(callId) {
+  clearInterval(_callStatusPollInterval);
+  _callStatusPollInterval = setInterval(function() {
+    if (!activeCall || activeCall.callId !== callId) { clearInterval(_callStatusPollInterval); return; }
+    fsGet("calls/"+callId).then(function(doc) {
+      if (!activeCall || activeCall.callId !== callId) return;
+      if (!doc || doc.status === "ended" || doc.status === "declined") {
+        clearInterval(_callStatusPollInterval);
+        endCall(true);
+      }
+    }).catch(function(){});
+  }, 2500);
+}
+
+// ── QUEM RECEBE ────────────────────────────────────────────────
+function startCallPolling() {
+  stopCallPolling();
+  if (!_idToken || !_fbUid) return;
+  _callRingPollInterval = setInterval(function() {
+    if (!_idToken || !_fbUid) { stopCallPolling(); return; }
+    if (activeCall || incomingCall) return; // já em uma chamada ou já tocando
+    fsQuery("calls", "calleeId", "EQUAL", ME_ID).then(function(docs) {
+      if (activeCall || incomingCall) return;
+      var now = Date.now();
+      var candidate = (docs||[]).find(function(d) {
+        if (d.status !== "ringing") return false;
+        if (_handledCallIds[d._id]) return false;
+        var age = now - new Date(d.createdAt||0).getTime();
+        return age >= 0 && age < 30000; // ignora chamadas velhas/travadas
+      });
+      if (candidate) {
+        incomingCall = { callId: candidate._id, callerId: candidate.callerId, convId: candidate.convId, offerSdp: candidate.offerSdp };
+        backgroundRender();
+      }
+    }).catch(function(){});
+  }, 3000);
+}
+
+function stopCallPolling() {
+  clearInterval(_callRingPollInterval);
+  _callRingPollInterval = null;
+}
+
+function renderIncomingCallScreen() {
+  var conv = CONVOS.find(function(c){ return c.userId === incomingCall.callerId; });
+  var u = USERS[incomingCall.callerId] || { name:"Alguém", avatar:"https://api.dicebear.com/7.x/avataaars/svg?seed="+incomingCall.callerId };
+  return '<div class="call-screen fade-in">' +
+    '<div class="call-status"><p class="call-sub">Chamada de voz</p></div>' +
+    '<div class="call-avatar-wrap">' +
+      '<div style="width:110px;height:110px;border-radius:50%;overflow:hidden;border:3px solid rgba(255,255,255,.3);animation:pulse 1.6s infinite;">' +
+        '<img src="'+u.avatar+'" style="width:100%;height:100%;object-fit:contain;object-position:center;display:block;margin:0 auto;">' +
+      '</div>' +
+      '<div><p class="call-name">'+esc(u.name)+'</p><p class="call-sub">Chamada recebida…</p></div>' +
+    '</div>' +
+    '<div class="call-controls">' +
+      '<button class="call-end-btn" data-decline-call>'+icoSvg("phone",26,"#fff",true)+'</button>' +
+      '<button class="call-end-btn call-accept-btn" data-accept-call>'+icoSvg("phone",26,"#fff",true)+'</button>' +
+    '</div>' +
+  '</div>';
+}
+
+function bindIncomingCallScreen() {
+  var acceptBtn = document.querySelector("[data-accept-call]");
+  if (acceptBtn) acceptBtn.addEventListener("click", _acceptIncomingCall);
+  var declineBtn = document.querySelector("[data-decline-call]");
+  if (declineBtn) declineBtn.addEventListener("click", _declineIncomingCall);
+}
+
+function _declineIncomingCall() {
+  if (!incomingCall) return;
+  var callId = incomingCall.callId;
+  _handledCallIds[callId] = true;
+  fsSet("calls/"+callId, { status:"declined" }, true).catch(function(){});
+  incomingCall = null;
+  render();
+}
+
+function _acceptIncomingCall() {
+  if (!incomingCall) return;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showToast("Seu navegador não permite chamadas de voz.");
+    _declineIncomingCall();
+    return;
+  }
+  var callId = incomingCall.callId;
+  var callerId = incomingCall.callerId;
+  var convId = incomingCall.convId;
+  var offerSdp = incomingCall.offerSdp;
+  _handledCallIds[callId] = true;
+  _callRole = "callee";
+
+  var conv = CONVOS.find(function(c){ return c.id === convId; }) || { id: convId, userId: callerId };
+  incomingCall = null;
+  activeCall = { conv:conv, type:"audio", status:"connected", seconds:0, muted:false, simulated:false, callId:callId };
+  render();
+
+  navigator.mediaDevices.getUserMedia({ audio:true })
+    .then(function(stream) {
+      _localCallStream = stream;
+      _rtcPeer = new RTCPeerConnection(RTC_CONFIG);
+      stream.getTracks().forEach(function(t){ _rtcPeer.addTrack(t, stream); });
+      _rtcPeer.ontrack = function(ev) { _playRemoteStream(ev.streams[0]); };
+      return _rtcPeer.setRemoteDescription({ type:"offer", sdp:offerSdp });
+    })
+    .then(function() { return _rtcPeer.createAnswer(); })
+    .then(function(answer) { return _rtcPeer.setLocalDescription(answer); })
+    .then(function() { return _waitIceGatheringComplete(_rtcPeer); })
+    .then(function() {
+      return fsSet("calls/"+callId, { status:"accepted", answerSdp: _rtcPeer.localDescription.sdp }, true);
+    })
+    .then(function() {
+      if (!activeCall || activeCall.callId !== callId) return;
+      startCallTimer();
+      _startCallEndWatcher(callId);
+    })
+    .catch(function(err) {
+      console.error("Erro ao aceitar chamada:", err);
+      if (err && err.name === "NotAllowedError") {
+        showToast("Permissão de microfone negada.");
+      } else {
+        showToast("Não foi possível conectar a chamada.");
+      }
+      fsSet("calls/"+callId, { status:"declined" }, true).catch(function(){});
+      _cleanupCallResources();
+      activeCall = null;
+      render();
+    });
 }
 
 function renderCallScreen() {
@@ -7795,25 +8083,49 @@ function renderCallScreen() {
     '<div class="call-controls">' +
       '<button class="call-ctrl-btn '+(activeCall.muted?"active":"")+'" data-toggle-mute>'+icoSvg(activeCall.muted?"micOff":"mic",24)+'</button>' +
       '<button class="call-end-btn" data-end-call>'+icoSvg("phone",26,"#fff",true)+'</button>' +
-      '<button class="call-ctrl-btn" data-toggle-speaker>'+icoSvg(activeCall.type==="video"?"videoCall":"phone",24)+'</button>' +
+      '<button class="call-ctrl-btn '+(activeCall.speakerOn?"active":"")+'" data-toggle-speaker>'+icoSvg(activeCall.type==="video"?"videoCall":"phone",24)+'</button>' +
     '</div>' +
   '</div>';
 }
 
 function bindCallScreen() {
   var endBtn = document.querySelector("[data-end-call]");
-  if (endBtn) endBtn.addEventListener("click", endCall);
+  if (endBtn) endBtn.addEventListener("click", function(){ endCall(); });
   var muteBtn = document.querySelector("[data-toggle-mute]");
   if (muteBtn) muteBtn.addEventListener("click", function() {
     activeCall.muted = !activeCall.muted;
+    // Silencia de verdade: desativa a trilha de áudio local (o outro lado
+    // realmente para de te ouvir, não é só um ícone mudando).
+    if (_localCallStream) {
+      _localCallStream.getAudioTracks().forEach(function(t){ t.enabled = !activeCall.muted; });
+    }
     render();
   });
   var spkBtn = document.querySelector("[data-toggle-speaker]");
-  if (spkBtn) spkBtn.addEventListener("click", function() { showToast("Alto-falante alternado"); });
+  if (spkBtn) spkBtn.addEventListener("click", function() {
+    activeCall.speakerOn = !activeCall.speakerOn;
+    // setSinkId troca a saída de áudio pro alto-falante quando o navegador
+    // suporta (Chrome desktop/Android recente). Sem suporte, avisamos e a
+    // pessoa troca manualmente no controle de volume do sistema.
+    if (_remoteAudioEl && typeof _remoteAudioEl.setSinkId === "function") {
+      _remoteAudioEl.setSinkId(activeCall.speakerOn ? "default" : "").catch(function(){});
+      render();
+    } else {
+      showToast(activeCall.speakerOn ? "Viva-voz ativado" : "Viva-voz desativado");
+      render();
+    }
+  });
 }
 
-function endCall() {
-  clearInterval(callTimerInterval);
+// endCall(remote) — remote=true quando quem encerrou foi a outra pessoa
+// (não precisamos escrever "ended" de volta nesse caso).
+function endCall(remote) {
+  var callId = activeCall && activeCall.callId;
+  var wasSimulated = activeCall && activeCall.simulated;
+  if (callId && !remote && !wasSimulated) {
+    fsSet("calls/"+callId, { status:"ended" }, true).catch(function(){});
+  }
+  _cleanupCallResources();
   activeCall = null;
   render();
 }
@@ -9849,6 +10161,7 @@ function onAuthSuccess(u) {
     render();
   }).catch(function(){});
   startNotifPolling();
+  startCallPolling();
 }
 
 function bindAuthPage() {
@@ -10355,6 +10668,7 @@ function hideSplash() {
 
         // ── 5. Polling de notificações ────────────────────────
         startNotifPolling();
+        startCallPolling();
       } else {
         render(); // Renderiza tela de login se usuário não carregar
       }
