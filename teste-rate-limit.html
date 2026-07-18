@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<title>Teste de Rate Limit — mimi-turnstile-verify</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 24px auto; padding: 0 16px; }
+  h1 { font-size: 18px; }
+  button { padding: 10px 18px; font-size: 15px; cursor: pointer; }
+  #log { margin-top: 16px; border: 1px solid #ccc; border-radius: 8px; padding: 10px; font-family: monospace; font-size: 13px; white-space: pre-wrap; max-height: 60vh; overflow-y: auto; }
+  .ok { color: #2a7a2a; }
+  .limited { color: #c0392b; font-weight: bold; }
+  .err { color: #b8860b; }
+</style>
+</head>
+<body>
+<h1>Teste de Rate Limit — mimi-turnstile-verify</h1>
+<p>Dispara 12 requisições POST seguidas pro Worker, com um token fake (não passa na verificação real do Turnstile — isso é esperado). O que importa aqui é <strong>a partir de qual tentativa aparece <code>rate_limited</code></strong>.</p>
+<button id="run">Disparar 12 requisições</button>
+<div id="log"></div>
+<script>
+var WORKER_URL = "https://mimi-turnstile-verify.franciscoviei123.workers.dev";
+document.getElementById("run").addEventListener("click", function() {
+  var log = document.getElementById("log");
+  log.textContent = "";
+  var btn = this;
+  btn.disabled = true;
+  var i = 0;
+  function next() {
+    i++;
+    if (i > 12) { btn.disabled = false; return; }
+    fetch(WORKER_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: "teste-fake-token" })
+    })
+    .then(function(r) { return r.json().then(function(d) { return { status: r.status, data: d }; }); })
+    .then(function(res) {
+      var cls = res.data.error === "rate_limited" ? "limited" : (res.status === 200 ? "ok" : "err");
+      var line = document.createElement("div");
+      line.className = cls;
+      line.textContent = "Tentativa " + i + ": HTTP " + res.status + " — " + JSON.stringify(res.data);
+      log.appendChild(line);
+      log.scrollTop = log.scrollHeight;
+    })
+    .catch(function(err) {
+      var line = document.createElement("div");
+      line.className = "err";
+      line.textContent = "Tentativa " + i + ": erro de rede — " + err.message;
+      log.appendChild(line);
+    })
+    .finally(function() {
+      setTimeout(next, 150);
+    });
+  }
+  next();
+});
+</script>
+</body>
+</html>
