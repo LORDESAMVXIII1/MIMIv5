@@ -6803,14 +6803,31 @@ function _mergeIncomingMessages(convoId, msgs) {
 // segue cobrindo tudo normalmente, então nada quebra pro usuário.
 var _rtUnsub = null;
 var _rtActiveConvoId = null;
+// 🩺 DIAGNÓSTICO: como o app roda só no celular (sem console pra ver os
+// console.warn de erro do listener), este indicador mostra DIRETO no
+// cabeçalho da conversa se o tempo real está de fato conectado ("⚡" verde)
+// ou se caiu pro polling REST de sempre ("🔄" cinza). Ajuda a confirmar se
+// a sessão paralela do Firebase Auth SDK está funcionando pra sua conta.
+function _updateRtIndicator() {
+  var el = appEl && appEl.querySelector("[data-rt-indicator]");
+  if (!el) return;
+  if (_rtActiveConvoId && _rtActiveConvoId === state.activeConvoId) {
+    el.innerHTML = '<span style="color:#2ecc71;" title="Tempo real conectado">⚡</span>';
+  } else {
+    el.innerHTML = '<span style="opacity:.6;" title="Sem tempo real — usando busca periódica">🔄</span>';
+  }
+}
 
 function attachRealtimeMessages(convoId) {
   detachRealtimeMessages();
+  _updateRtIndicator();
   if (!convoId || !_rtdbReady || typeof firebase === "undefined" || !firebase.firestore) return;
   try {
     _rtUnsub = firebase.firestore()
       .collection("convos").doc(convoId).collection("messages")
       .onSnapshot(function(snapshot) {
+        _rtActiveConvoId = convoId; // primeira notificação confirma que o listener está de fato entregando dados
+        _updateRtIndicator();
         var msgs = [];
         snapshot.docChanges().forEach(function(change) {
           if (change.type === "removed") return; // apagar msg usa a flag "deleted", não remoção do doc
@@ -6825,14 +6842,23 @@ function attachRealtimeMessages(convoId) {
         console.warn("⚠️ Listener em tempo real falhou, mantendo polling REST:", err && err.code);
         if (_rtActiveConvoId === convoId) _rtActiveConvoId = null;
         _rtUnsub = null;
+        _updateRtIndicator();
+        if (!_rtErrorToastShown) {
+          _rtErrorToastShown = true;
+          showToast("Tempo real indisponível (" + (err && err.code || "erro desconhecido") + ") — usando busca periódica.");
+        }
       });
-    _rtActiveConvoId = convoId;
+    // Não marcamos _rtActiveConvoId aqui ainda — só quando o primeiro
+    // snapshot chegar de verdade (acima), pra o indicador refletir uma
+    // conexão CONFIRMADA, não só uma tentativa de inscrição.
   } catch (e) {
     console.warn("⚠️ Não foi possível abrir o listener em tempo real:", e);
     _rtActiveConvoId = null;
     _rtUnsub = null;
+    _updateRtIndicator();
   }
 }
+var _rtErrorToastShown = false;
 
 function detachRealtimeMessages() {
   if (_rtUnsub) { try { _rtUnsub(); } catch(e){} _rtUnsub = null; }
@@ -6913,6 +6939,7 @@ function startChatPolling() {
   _pollInterval = setInterval(function() {
     if (!state.activeConvoId || !_idToken) { stopChatPolling(); return; }
     try {
+      _updateRtIndicator(); // reafirma o ícone ⚡/🔄 mesmo depois de um render que recriou o cabeçalho
       checkOnlineStatus(CONVOS);
       // Se o tempo real está ativo e cobrindo ESSA conversa, pula a busca
       // de mensagens por REST neste tick — o onSnapshot já mantém isso
@@ -10640,7 +10667,7 @@ function renderChatView(conv) {
       '<button class="icon-btn" data-back-msgs>'+icoSvg("back",22)+'</button>' +
       '<div data-open-author="'+conv.userId+'" style="cursor:pointer;">'+avatarHtml(u.avatar, 38, conv.online, false, false, null, null, getUserFrame(u))+'</div>' +
       '<div class="grow" data-open-author="'+conv.userId+'" style="cursor:pointer;"><div style="font-weight:700;font-size:14px;">'+esc(u.name)+'</div>' +
-      '<div style="font-size:11px;opacity:.75;" data-online-indicator>'+(conv.online?"Online agora":"Offline")+'</div></div>' +
+      '<div style="font-size:11px;opacity:.75;" data-online-indicator>'+(conv.online?"Online agora":"Offline")+'<span data-rt-indicator style="margin-left:6px;"></span></div></div>' +
       '<button class="icon-btn chat-theme-btn" data-open-chat-theme title="Tema da conversa">'+icoSvg("palette",21)+'</button>' +
       '<button class="icon-btn" data-call="audio">'+icoSvg("phone",21)+'</button>' +
       '<button class="icon-btn" data-call="video">'+icoSvg("videoCall",22)+'</button>' +
