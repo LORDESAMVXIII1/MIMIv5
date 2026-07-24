@@ -546,31 +546,40 @@
   }
 
   /* Picker de temas — bottom sheet */
-  .chat-theme-picker { position:fixed; inset:0; background:rgba(0,0,0,.55); display:flex; align-items:flex-end; z-index:1200; animation:fadeIn .2s ease; }
-  .theme-picker-panel { background:var(--bg); width:100%; max-height:82vh; border-radius:26px 26px 0 0; padding:18px 16px 26px; animation:slideUp .32s cubic-bezier(.2,.8,.3,1); overflow-y:auto; scrollbar-width:none; }
+  .chat-theme-picker { position:fixed; inset:0; background:rgba(0,0,0,.55); display:flex; align-items:flex-end; z-index:1200; animation:fadeIn .2s ease; backdrop-filter: blur(4px); }
+  .theme-picker-panel { background:var(--bg); width:100%; max-height:86vh; border-radius:28px 28px 0 0; padding:14px 14px 22px; animation:slideUp .32s cubic-bezier(.2,.8,.3,1); overflow-y:auto; scrollbar-width:none; display:flex; flex-direction:column; }
   .theme-picker-panel::-webkit-scrollbar { display:none; }
-  .theme-picker-handle { width:44px; height:4px; border-radius:2px; background:var(--border); margin:0 auto 14px; }
-  .theme-picker-title { font-size:17px; font-weight:800; color:var(--text); margin:0 0 4px; text-align:center; }
-  .theme-picker-sub { font-size:12px; color:var(--muted); text-align:center; margin:0 0 18px; }
-  .theme-picker-section { font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin:12px 4px 8px; }
-  .theme-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:12px; }
+  .theme-picker-handle { width:40px; height:4px; border-radius:2px; background:var(--border); margin:0 auto 12px; flex-shrink:0; }
+  .theme-picker-title { font-size:16px; font-weight:800; color:var(--text); margin:0 0 2px; text-align:center; letter-spacing:-.01em; }
+  .theme-picker-sub { font-size:11.5px; color:var(--muted); text-align:center; margin:0 0 14px; }
+  .theme-tabs { display:flex; gap:6px; overflow-x:auto; scrollbar-width:none; padding:2px 2px 12px; margin:0 -4px 4px; flex-shrink:0; -webkit-overflow-scrolling:touch; }
+  .theme-tabs::-webkit-scrollbar { display:none; }
+  .theme-tab { flex:0 0 auto; display:inline-flex; align-items:center; gap:6px; padding:8px 13px; border-radius:999px; border:1px solid var(--border); background:var(--surface); color:var(--sub); font-size:12.5px; font-weight:600; cursor:pointer; transition:all .18s ease; white-space:nowrap; }
+  .theme-tab svg { width:14px; height:14px; }
+  .theme-tab:active { transform:scale(.94); }
+  .theme-tab.active { background:var(--text); color:var(--bg); border-color:var(--text); }
+  .theme-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; }
   .theme-card {
-    position:relative; border-radius:18px; overflow:hidden; cursor:pointer;
-    aspect-ratio: 4/5; border:2px solid var(--border); background:var(--surface);
-    transition:transform .18s ease, border-color .18s ease, box-shadow .18s ease;
-    padding:0; text-align:left;
+    position:relative; border-radius:16px; overflow:hidden; cursor:pointer;
+    aspect-ratio: 1/1; border:1.5px solid var(--border); background:var(--surface);
+    transition:transform .2s cubic-bezier(.2,.8,.3,1), border-color .18s ease, box-shadow .22s ease;
+    padding:0; text-align:left; display:block;
   }
-  .theme-card:active { transform:scale(.96); }
-  .theme-card.active { border-color:var(--accent); box-shadow:0 6px 22px rgba(255,111,165,.35); }
+  .theme-card:active { transform:scale(.95); }
+  .theme-card.active { border-color:var(--accent); box-shadow:0 8px 28px -6px color-mix(in oklab, var(--accent) 45%, transparent); transform:translateY(-2px); }
   .theme-card-preview { position:absolute; inset:0; }
   .theme-card-bubble-r, .theme-card-bubble-s {
-    position:absolute; padding:6px 10px; font-size:11px; border-radius:12px; max-width:70%; line-height:1.3;
+    position:absolute; padding:5px 9px; font-size:10.5px; border-radius:10px; max-width:62%; line-height:1.25; font-weight:500;
   }
-  .theme-card-bubble-r { top:38%; left:10%; background:rgba(255,255,255,.9); color:#222; }
-  .theme-card-bubble-s { bottom:22%; right:10%; color:#fff; }
-  .theme-card-name { position:absolute; left:10px; bottom:8px; right:10px; font-size:12px; font-weight:700; color:#fff; text-shadow:0 1px 3px rgba(0,0,0,.55); display:flex; align-items:center; gap:6px; }
-  .theme-card-check { position:absolute; top:8px; right:8px; width:22px; height:22px; border-radius:50%; background:var(--accent); color:#fff; display:none; align-items:center; justify-content:center; font-size:13px; font-weight:800; }
-  .theme-card.active .theme-card-check { display:flex; }
+  .theme-card-bubble-r { top:22%; left:10%; background:rgba(255,255,255,.92); color:#222; box-shadow:0 1px 4px rgba(0,0,0,.08); }
+  .theme-card-bubble-s { top:46%; right:10%; color:#fff; box-shadow:0 1px 4px rgba(0,0,0,.12); }
+  .theme-card-name { position:absolute; left:10px; bottom:8px; right:10px; font-size:11.5px; font-weight:700; color:#fff; text-shadow:0 1px 3px rgba(0,0,0,.6); display:flex; align-items:center; gap:5px; letter-spacing:-.01em; }
+  .theme-card-name svg { width:12px; height:12px; flex-shrink:0; }
+  .theme-card-check { position:absolute; top:8px; right:8px; width:22px; height:22px; border-radius:50%; background:var(--accent); color:#fff; display:none; align-items:center; justify-content:center; box-shadow:0 2px 8px rgba(0,0,0,.25); }
+  .theme-card-check svg { width:13px; height:13px; }
+  .theme-card.active .theme-card-check { display:flex; animation:themeCheckPop .28s cubic-bezier(.2,1.5,.4,1); }
+  @keyframes themeCheckPop { 0% { transform:scale(0); } 60% { transform:scale(1.15); } 100% { transform:scale(1); } }
+  .theme-grid-empty { grid-column:1/-1; text-align:center; color:var(--muted); font-size:12.5px; padding:30px 10px; }
 
   /* Partículas animadas (corações/pétalas/estrelas/flocos) */
   .chat-particles { position:absolute; inset:0; pointer-events:none; overflow:hidden; z-index:0; }
@@ -2732,14 +2741,79 @@ function _persistHiddenMsgIds() {
 // injeta um overlay animado dentro do chat (corações, pétalas, estrelas).
 // Os temas ficam salvos no doc da conversa (Firestore) → sincronizam entre
 // os dois usuários. Categoria só serve pra organizar a galeria no picker.
+// Ícones inline (estilo Lucide) — substituem os emojis nos temas.
+var THEME_ICONS = {
+  sparkles: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 3v4M21 5h-4M5 17v4M7 19H3"/></svg>',
+  flower: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2.5"/><path d="M12 2a3 3 0 0 1 3 3c0 1.5-1 3-3 5-2-2-3-3.5-3-5a3 3 0 0 1 3-3zM12 22a3 3 0 0 0 3-3c0-1.5-1-3-3-5-2 2-3 3.5-3 5a3 3 0 0 0 3 3zM2 12a3 3 0 0 1 3-3c1.5 0 3 1 5 3-2 2-3.5 3-5 3a3 3 0 0 1-3-3zM22 12a3 3 0 0 0-3-3c-1.5 0-3 1-5 3 2 2 3.5 3 5 3a3 3 0 0 0 3-3z"/></svg>',
+  heart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>',
+  icecream: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22 6 10h12z"/><path d="M17 10a5 5 0 1 0-10 0"/></svg>',
+  sun: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>',
+  galaxy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.5 0 4.8.8 6.6 2.4"/><circle cx="12" cy="12" r="3"/></svg>',
+  leaf: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 20A7 7 0 0 1 4 13c0-5 4-9 9-9h6v6a9 9 0 0 1-8 8"/><path d="M2 22c2-6 6-10 12-10"/></svg>',
+  page: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h6"/></svg>',
+  moon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>',
+  star: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26"/></svg>',
+  snow: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M4.93 4.93l14.14 14.14M2 12h20M4.93 19.07L19.07 4.93"/></svg>',
+  cloud: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 1 0-1.4-8.78 6 6 0 0 0-11.6 2.28A4 4 0 0 0 5 19z"/></svg>',
+  peach: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21a8 8 0 0 1-8-8c0-5 4-9 8-9s8 4 8 9a8 8 0 0 1-8 8z"/><path d="M12 4c1 1 2 2 2 3"/></svg>',
+  droplet: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>',
+  candy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><path d="M6 6l-3-1 1 3M18 18l3 1-1-3M18 6l3-1-1 3M6 18l-3 1 1-3"/></svg>',
+  mountain: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 3 4 8 5-5 5 15H2L8 3z"/></svg>',
+  wheat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 22 16 8M3.47 12.53a4 4 0 0 1 5.65-5.65M8.24 7.76a4 4 0 0 1 5.65-5.66M13 3.47a4 4 0 0 1 5.65 5.65M17.76 8.24a4 4 0 0 1 5.66 5.65M12.53 3.47a4 4 0 0 1-5.65 5.65"/></svg>',
+  circle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/></svg>',
+  check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
+  layers: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>',
+};
+
 var CHAT_THEMES = {
   none: {
-    label: "Padrão", emoji: "✨", category: "Minimalistas",
-    vars: {}, // usa o design system normal
+    label: "Padrão", icon: "sparkles", category: "Minimalistas",
+    vars: {},
   },
-  // ─── Românticos & fofos ───
+  // ─── Fofos ───
+  bubblegum: {
+    label: "Bubblegum", icon: "candy", category: "Fofos",
+    vars: {
+      "--chat-bg": "linear-gradient(160deg,#ffe0f0 0%,#ffd6e8 50%,#ffe8f5 100%)",
+      "--chat-sent-bg": "linear-gradient(135deg,#ff8ec7,#ffb3d9)",
+      "--chat-recv-bg": "rgba(255,255,255,.95)", "--chat-recv-fg": "#5a1f3d",
+      "--chat-header-bg": "rgba(255,224,240,.94)", "--chat-header-fg": "#6d1f45",
+      "--chat-accent": "#ff5fa8", "--chat-time": "rgba(90,31,61,.5)",
+    },
+  },
+  peachCream: {
+    label: "Peach Cream", icon: "peach", category: "Fofos",
+    vars: {
+      "--chat-bg": "linear-gradient(180deg,#fff2e8 0%,#ffdcc4 100%)",
+      "--chat-sent-bg": "linear-gradient(135deg,#ff9a76,#ffb896)",
+      "--chat-recv-bg": "rgba(255,255,255,.94)", "--chat-recv-fg": "#5a2b1a",
+      "--chat-header-bg": "rgba(255,242,232,.94)", "--chat-header-fg": "#6d3320",
+      "--chat-accent": "#ff7a50", "--chat-time": "rgba(90,43,26,.5)",
+    },
+  },
+  babyBlue: {
+    label: "Baby Blue", icon: "droplet", category: "Fofos",
+    vars: {
+      "--chat-bg": "linear-gradient(180deg,#e8f4ff 0%,#cfe4ff 100%)",
+      "--chat-sent-bg": "linear-gradient(135deg,#7cb8ff,#a5cdff)",
+      "--chat-recv-bg": "rgba(255,255,255,.95)", "--chat-recv-fg": "#1a3958",
+      "--chat-header-bg": "rgba(232,244,255,.94)", "--chat-header-fg": "#1e4166",
+      "--chat-accent": "#4a9eff", "--chat-time": "rgba(26,57,88,.5)",
+    },
+  },
+  marshmallow: {
+    label: "Marshmallow", icon: "cloud", category: "Fofos",
+    vars: {
+      "--chat-bg": "linear-gradient(160deg,#faf0ff 0%,#f0e4ff 50%,#e8dfff 100%)",
+      "--chat-sent-bg": "linear-gradient(135deg,#b599f0,#d0b8ff)",
+      "--chat-recv-bg": "rgba(255,255,255,.94)", "--chat-recv-fg": "#3a1e5c",
+      "--chat-header-bg": "rgba(250,240,255,.94)", "--chat-header-fg": "#452470",
+      "--chat-accent": "#8a5cf2", "--chat-time": "rgba(58,30,92,.5)",
+    },
+  },
+  // ─── Românticos ───
   roseGarden: {
-    label: "Jardim de rosas", emoji: "🌸", category: "Românticos",
+    label: "Jardim de rosas", icon: "flower", category: "Românticos",
     vars: {
       "--chat-bg": "linear-gradient(160deg,#ffe4ee 0%,#fff0f6 45%,#ffe6f2 100%)",
       "--chat-sent-bg": "linear-gradient(135deg,#ff6fa5,#ff9fbf)",
@@ -2751,7 +2825,7 @@ var CHAT_THEMES = {
     particles: "petals",
   },
   velvetHeart: {
-    label: "Coração de veludo", emoji: "💗", category: "Românticos",
+    label: "Coração de veludo", icon: "heart", category: "Românticos",
     vars: {
       "--chat-bg": "radial-gradient(1200px 800px at 20% 10%,#ffd6e7 0%,transparent 60%),linear-gradient(180deg,#fdf2f8 0%,#fbe4f1 100%)",
       "--chat-sent-bg": "linear-gradient(135deg,#d63384,#ff6fa5)",
@@ -2762,7 +2836,7 @@ var CHAT_THEMES = {
     particles: "hearts",
   },
   vanillaLove: {
-    label: "Baunilha", emoji: "🍦", category: "Românticos",
+    label: "Baunilha", icon: "icecream", category: "Românticos",
     vars: {
       "--chat-bg": "linear-gradient(180deg,#fff8f0 0%,#fceedd 100%)",
       "--chat-sent-bg": "linear-gradient(135deg,#e8a87c,#c48b6c)",
@@ -2771,9 +2845,51 @@ var CHAT_THEMES = {
       "--chat-accent": "#c26a3a", "--chat-time": "rgba(74,47,28,.55)",
     },
   },
-  // ─── Gradientes vibrantes ───
+  // ─── Neutros ───
+  stone: {
+    label: "Stone", icon: "circle", category: "Neutros",
+    vars: {
+      "--chat-bg": "linear-gradient(180deg,#f4f2ef 0%,#e8e4de 100%)",
+      "--chat-sent-bg": "linear-gradient(135deg,#4a4744,#6b6763)",
+      "--chat-recv-bg": "rgba(255,255,255,.95)", "--chat-recv-fg": "#2d2b28",
+      "--chat-header-bg": "rgba(244,242,239,.95)", "--chat-header-fg": "#2d2b28",
+      "--chat-accent": "#4a4744", "--chat-time": "rgba(45,43,40,.5)",
+    },
+  },
+  linen: {
+    label: "Linen", icon: "layers", category: "Neutros",
+    vars: {
+      "--chat-bg": "#f7f4ee",
+      "--chat-sent-bg": "linear-gradient(135deg,#8b7d6b,#a89680)",
+      "--chat-recv-bg": "#ffffff", "--chat-recv-fg": "#3d352a",
+      "--chat-recv-border": "rgba(139,125,107,.15)",
+      "--chat-header-bg": "#f7f4ee", "--chat-header-fg": "#3d352a",
+      "--chat-accent": "#8b7d6b", "--chat-time": "rgba(61,53,42,.5)",
+    },
+  },
+  sand: {
+    label: "Sand", icon: "wheat", category: "Neutros",
+    vars: {
+      "--chat-bg": "linear-gradient(180deg,#faf5eb 0%,#f0e5cf 100%)",
+      "--chat-sent-bg": "linear-gradient(135deg,#c9a86b,#dcc191)",
+      "--chat-recv-bg": "rgba(255,255,255,.95)", "--chat-recv-fg": "#4a3a1e",
+      "--chat-header-bg": "rgba(250,245,235,.95)", "--chat-header-fg": "#4a3a1e",
+      "--chat-accent": "#b8934a", "--chat-time": "rgba(74,58,30,.5)",
+    },
+  },
+  slate: {
+    label: "Slate", icon: "mountain", category: "Neutros",
+    vars: {
+      "--chat-bg": "linear-gradient(180deg,#eef1f5 0%,#dde3ec 100%)",
+      "--chat-sent-bg": "linear-gradient(135deg,#4a5568,#6b7688)",
+      "--chat-recv-bg": "rgba(255,255,255,.95)", "--chat-recv-fg": "#1e2733",
+      "--chat-header-bg": "rgba(238,241,245,.95)", "--chat-header-fg": "#1e2733",
+      "--chat-accent": "#4a5568", "--chat-time": "rgba(30,39,51,.5)",
+    },
+  },
+  // ─── Vibrantes ───
   sunsetBlaze: {
-    label: "Sunset", emoji: "🌅", category: "Vibrantes",
+    label: "Sunset", icon: "sun", category: "Vibrantes",
     vars: {
       "--chat-bg": "linear-gradient(160deg,#ff6b35 0%,#f7931e 35%,#e84393 75%,#6c5ce7 100%)",
       "--chat-sent-bg": "linear-gradient(135deg,#ffffff,#ffe1cf)",
@@ -2786,7 +2902,7 @@ var CHAT_THEMES = {
     },
   },
   aurora: {
-    label: "Aurora", emoji: "🌌", category: "Vibrantes",
+    label: "Aurora", icon: "galaxy", category: "Vibrantes",
     vars: {
       "--chat-bg": "linear-gradient(160deg,#0f0c29 0%,#302b63 40%,#24243e 100%)",
       "--chat-sent-bg": "linear-gradient(135deg,#4ade80,#a78bfa)",
@@ -2800,7 +2916,7 @@ var CHAT_THEMES = {
     particles: "stars",
   },
   neonMint: {
-    label: "Neon Mint", emoji: "🍃", category: "Vibrantes",
+    label: "Neon Mint", icon: "leaf", category: "Vibrantes",
     vars: {
       "--chat-bg": "linear-gradient(180deg,#0d1b2a 0%,#1b4332 100%)",
       "--chat-sent-bg": "linear-gradient(135deg,#2dd4a8,#73ffb8)",
@@ -2813,7 +2929,7 @@ var CHAT_THEMES = {
   },
   // ─── Minimalistas ───
   paperInk: {
-    label: "Papel & Tinta", emoji: "📃", category: "Minimalistas",
+    label: "Papel & Tinta", icon: "page", category: "Minimalistas",
     vars: {
       "--chat-bg": "#f5f3ee",
       "--chat-sent-bg": "#1a1a1a", "--chat-sent-fg": "#f5f3ee",
@@ -2824,7 +2940,7 @@ var CHAT_THEMES = {
     },
   },
   midnight: {
-    label: "Meia-noite", emoji: "🌑", category: "Minimalistas",
+    label: "Meia-noite", icon: "moon", category: "Minimalistas",
     vars: {
       "--chat-bg": "#0e0e12",
       "--chat-sent-bg": "linear-gradient(135deg,#4f46e5,#818cf8)", "--chat-sent-fg": "#fff",
@@ -2835,9 +2951,9 @@ var CHAT_THEMES = {
       "--chat-header-border": "rgba(255,255,255,.06)",
     },
   },
-  // ─── Sazonais / animados ───
+  // ─── Sazonais ───
   starryNight: {
-    label: "Noite estrelada", emoji: "⭐", category: "Sazonais",
+    label: "Noite estrelada", icon: "star", category: "Sazonais",
     vars: {
       "--chat-bg": "radial-gradient(1000px 700px at 80% 10%,#1e3a8a 0%,transparent 60%),linear-gradient(180deg,#020617 0%,#0f172a 100%)",
       "--chat-sent-bg": "linear-gradient(135deg,#fbbf24,#f59e0b)", "--chat-sent-fg": "#1a1204",
@@ -2849,7 +2965,7 @@ var CHAT_THEMES = {
     particles: "stars",
   },
   cherryBlossom: {
-    label: "Sakura", emoji: "🌸", category: "Sazonais",
+    label: "Sakura", icon: "flower", category: "Sazonais",
     vars: {
       "--chat-bg": "linear-gradient(160deg,#fef0f5 0%,#ffe4ec 60%,#f8c8d8 100%)",
       "--chat-sent-bg": "linear-gradient(135deg,#e88aab,#c45c7c)",
@@ -2860,18 +2976,20 @@ var CHAT_THEMES = {
     particles: "petals",
   },
   winter: {
-    label: "Inverno", emoji: "❄️", category: "Sazonais",
+    label: "Inverno", icon: "snow", category: "Sazonais",
     vars: {
       "--chat-bg": "linear-gradient(180deg,#e0f2fe 0%,#bae6fd 100%)",
       "--chat-sent-bg": "linear-gradient(135deg,#2e6b8a,#6ba3c8)",
       "--chat-recv-bg": "rgba(255,255,255,.94)", "--chat-recv-fg": "#0c2340",
       "--chat-header-bg": "rgba(224,242,254,.94)", "--chat-header-fg": "#0c2340",
       "--chat-accent": "#2e6b8a", "--chat-time": "rgba(12,35,64,.55)",
+      "--chat-accent-fg": "#fff",
     },
     particles: "snow",
   },
 };
-var THEME_CATEGORIES = ["Românticos", "Vibrantes", "Minimalistas", "Sazonais"];
+var THEME_CATEGORIES = ["Fofos", "Românticos", "Neutros", "Minimalistas", "Vibrantes", "Sazonais"];
+var THEME_CATEGORY_ICONS = { "Fofos":"heart", "Românticos":"flower", "Neutros":"circle", "Minimalistas":"page", "Vibrantes":"sun", "Sazonais":"star" };
 
 function getChatTheme(convoId) {
   var conv = CONVOS.find(function(c){ return c.id === convoId; });
@@ -2890,7 +3008,8 @@ function renderChatParticles(kind) {
   try {
     if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return "";
   } catch(e) {}
-  var glyph = kind === "hearts" ? "💗" : kind === "petals" ? "🌸" : kind === "snow" ? "❄" : "✦";
+  // Glifos geométricos (não-emoji) para partículas.
+  var glyph = kind === "hearts" ? "♥" : kind === "petals" ? "❋" : kind === "snow" ? "❆" : "✦";
   var isTwinkle = kind === "stars";
   var count = isTwinkle ? 18 : 14;
   var out = '<div class="chat-particles" aria-hidden="true">';
@@ -2913,7 +3032,12 @@ function renderChatParticles(kind) {
   return out;
 }
 
+function themeIcon(name) {
+  return THEME_ICONS[name] || THEME_ICONS.sparkles;
+}
+
 // Abre o picker de temas (bottom sheet) pra conversa ativa.
+// Redesign: filtro por categoria (pills roláveis), grid minimalista, ícones SVG.
 function openThemePickerModal() {
   var convoId = state.activeConvoId;
   if (!convoId) return;
@@ -2921,56 +3045,90 @@ function openThemePickerModal() {
   var existing = appEl.querySelector("[data-theme-picker]");
   if (existing) existing.remove();
 
-  var groups = {};
-  Object.keys(CHAT_THEMES).forEach(function(k){
-    var t = CHAT_THEMES[k];
-    var cat = t.category || "Outros";
-    (groups[cat] = groups[cat] || []).push({ key:k, def:t });
+  // Descobre a categoria do tema ativo para abrir já no filtro certo.
+  var currentCat = (CHAT_THEMES[current] && CHAT_THEMES[current].category) || "Fofos";
+  var activeCat = currentCat;
+
+  var allEntries = Object.keys(CHAT_THEMES).map(function(k){
+    return { key: k, def: CHAT_THEMES[k] };
   });
 
-  var html = '<div class="theme-picker-panel">' +
-    '<div class="theme-picker-handle"></div>' +
-    '<div class="theme-picker-title">Tema da conversa</div>' +
-    '<div class="theme-picker-sub">Aplicado pra vocês dois — muda o papel de parede, os balões e a cor de destaque.</div>';
+  function renderTabs() {
+    var tabsHtml = '<button class="theme-tab'+(activeCat==="Todos"?" active":"")+'" data-tab="Todos" type="button">'+
+      themeIcon("sparkles")+'Todos</button>';
+    THEME_CATEGORIES.forEach(function(cat){
+      var has = allEntries.some(function(e){ return (e.def.category||"") === cat; });
+      if (!has) return;
+      var ic = THEME_CATEGORY_ICONS[cat] || "circle";
+      tabsHtml += '<button class="theme-tab'+(activeCat===cat?" active":"")+'" data-tab="'+esc(cat)+'" type="button">'+
+        themeIcon(ic)+esc(cat)+'</button>';
+    });
+    return tabsHtml;
+  }
 
-  ["Minimalistas","Românticos","Vibrantes","Sazonais"].forEach(function(cat){
-    if (!groups[cat]) return;
-    html += '<div class="theme-picker-section">'+cat+'</div>';
-    html += '<div class="theme-grid">';
-    groups[cat].forEach(function(item){
+  function renderGrid() {
+    var list = activeCat === "Todos"
+      ? allEntries
+      : allEntries.filter(function(e){ return (e.def.category||"") === activeCat; });
+    if (!list.length) return '<div class="theme-grid-empty">Nenhum tema nesta categoria.</div>';
+    return list.map(function(item){
       var t = item.def, k = item.key;
       var isActive = k === current;
       var previewStyle = themeVarsToStyle(t.vars);
       var bg = (t.vars && t.vars["--chat-bg"]) || "var(--surface)";
       var sentBg = (t.vars && t.vars["--chat-sent-bg"]) || "linear-gradient(135deg,var(--accent),var(--accentL))";
       var sentFg = (t.vars && t.vars["--chat-sent-fg"]) || "#fff";
-      html += '<button class="theme-card'+(isActive?" active":"")+'" data-pick-theme="'+esc(k)+'" style="'+previewStyle+'" type="button">' +
+      return '<button class="theme-card'+(isActive?" active":"")+'" data-pick-theme="'+esc(k)+'" style="'+previewStyle+'" type="button">' +
         '<div class="theme-card-preview" style="background:'+bg+';"></div>' +
-        '<div class="theme-card-bubble-r">Oi 💬</div>' +
+        '<div class="theme-card-bubble-r">Oi</div>' +
         '<div class="theme-card-bubble-s" style="background:'+sentBg+';color:'+sentFg+';">Tudo bem?</div>' +
-        '<div class="theme-card-check">✓</div>' +
-        '<div class="theme-card-name">'+t.emoji+' '+esc(t.label)+'</div>' +
+        '<div class="theme-card-check">'+themeIcon("check")+'</div>' +
+        '<div class="theme-card-name">'+themeIcon(t.icon||"sparkles")+'<span>'+esc(t.label)+'</span></div>' +
       '</button>';
-    });
-    html += '</div>';
-  });
+    }).join("");
+  }
 
-  html += '</div>';
+  var panelHtml = '<div class="theme-picker-panel">' +
+    '<div class="theme-picker-handle"></div>' +
+    '<div class="theme-picker-title">Tema da conversa</div>' +
+    '<div class="theme-picker-sub">Aplicado pra vocês dois — muda papel de parede, balões e destaque.</div>' +
+    '<div class="theme-tabs" data-theme-tabs>'+renderTabs()+'</div>' +
+    '<div class="theme-grid" data-theme-grid>'+renderGrid()+'</div>' +
+  '</div>';
 
   var modal = document.createElement("div");
   modal.className = "chat-theme-picker";
   modal.setAttribute("data-theme-picker", "1");
-  modal.innerHTML = html;
+  modal.innerHTML = panelHtml;
   appEl.appendChild(modal);
 
-  modal.addEventListener("click", function(e){ if (e.target === modal) closeThemePickerModal(); });
-  modal.querySelectorAll("[data-pick-theme]").forEach(function(btn){
-    btn.addEventListener("click", function(){
-      var key = btn.getAttribute("data-pick-theme");
-      applyChatTheme(convoId, key);
-      closeThemePickerModal();
+  var tabsEl = modal.querySelector("[data-theme-tabs]");
+  var gridEl = modal.querySelector("[data-theme-grid]");
+
+  function bindCards() {
+    gridEl.querySelectorAll("[data-pick-theme]").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        var key = btn.getAttribute("data-pick-theme");
+        applyChatTheme(convoId, key);
+        closeThemePickerModal();
+      });
     });
-  });
+  }
+
+  function bindTabs() {
+    tabsEl.querySelectorAll("[data-tab]").forEach(function(t){
+      t.addEventListener("click", function(){
+        activeCat = t.getAttribute("data-tab");
+        tabsEl.innerHTML = renderTabs();
+        gridEl.innerHTML = renderGrid();
+        bindTabs(); bindCards();
+      });
+    });
+  }
+
+  bindTabs(); bindCards();
+
+  modal.addEventListener("click", function(e){ if (e.target === modal) closeThemePickerModal(); });
 }
 
 function closeThemePickerModal() {
