@@ -6330,20 +6330,49 @@ function patchChatMessagesInPlace(convoId) {
   var cardEls = chatBox.querySelectorAll(".msg-card[data-msg-id]");
   if (cardEls.length > chat.length) return false;
 
-  // Confere que tudo que já está na tela ainda bate exatamente com o que
-  // temos em memória (mesma ordem, mesmo estado de apagada/reação). Se
-  // alguma coisa não bater, mais seguro cair pro render completo do que
-  // tentar adivinhar o que fazer.
+  // 🩹 FIX (piscar em conversas ativas): antes, se um card já na tela não
+  // batesse exatamente com o estado atual (reação nova chegando, mensagem
+  // apagada), a função INTEIRA desistia e caía pro render() completo —
+  // ou seja, TODA reação de qualquer um dos dois lados da conversa forçava
+  // reconstruir a tela toda. Com os dois participantes ativos (mais
+  // reações, mais mensagens, mais coisa mudando ao mesmo tempo), isso
+  // virava um "pisca" quase contínuo. Agora, em vez de desistir, cada card
+  // que não bate é remendado no próprio lugar — só quando a ORDEM das
+  // mensagens não bate mesmo (algo bem mais raro) é que ainda cai pro
+  // render completo, por segurança.
   for (var i = 0; i < cardEls.length; i++) {
     var card = cardEls[i];
     var m = chat[i];
     if (!m || m.id !== card.getAttribute("data-msg-id")) return false;
     var cardIsDeleted = !!card.querySelector(".msg-deleted-text");
-    if (!!m.deleted !== cardIsDeleted) return false;
+    if (!!m.deleted !== cardIsDeleted) {
+      // Mudança de estrutura grande o bastante (apagou/desapagou) — mais
+      // simples e seguro recriar só ESTE card do que remendar por dentro.
+      var freshWrap = document.createElement("div");
+      freshWrap.innerHTML = renderChatMsgCardHtml(m, conv);
+      var freshCard = freshWrap.firstElementChild;
+      if (freshCard) {
+        card.replaceWith(freshCard);
+        bindMsgElementSwipe(freshCard);
+        if ((!m.type || m.type === "text") && !m.deleted) ensureMessageTranslation(m);
+        bindAudioPlayback();
+      }
+      continue;
+    }
     var badgeImg = card.querySelector(".msg-reaction-badge img");
     var badgeType = badgeImg ? badgeImg.getAttribute("data-reaction-type") : null;
     var curType = (!m.deleted && m.reaction && MSG_REACTIONS[m.reaction.type]) ? m.reaction.type : null;
-    if (badgeType !== curType) return false;
+    if (badgeType !== curType) {
+      var contentEl = card.querySelector(".msg-content");
+      var existingBadge = card.querySelector(".msg-reaction-badge");
+      if (existingBadge) existingBadge.remove();
+      if (curType && contentEl) {
+        var badgeSpan = document.createElement("span");
+        badgeSpan.className = "msg-reaction-badge";
+        badgeSpan.innerHTML = '<img src="'+MSG_REACTIONS[curType].img+'" data-reaction-type="'+esc(curType)+'" alt="">';
+        contentEl.appendChild(badgeSpan);
+      }
+    }
   }
 
   if (cardEls.length === chat.length) return true; // nada novo pra adicionar, nada a fazer
