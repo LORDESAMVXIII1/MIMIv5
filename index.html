@@ -6148,33 +6148,42 @@ var _onlineCheckInterval = 30000;  // Checar a cada 30s (não a cada 8s)
 // "invisível" que apps nativos como o WhatsApp fazem — só o pedacinho que
 // mudou é tocado, o resto da tela (inclusive qualquer menu/painel aberto)
 // nem percebe que algo foi atualizado.
+// 🩹 FIX (piscar constante): esta função reportava "falhou" (forçando o
+// backgroundRender() cheio, o "pisca") sempre que não havia NENHUM ponto
+// verde visível na tela pra atualizar — por exemplo, o status mudou pra
+// alguém que não aparece na tela atual. Isso não é uma falha de verdade,
+// é só não ter nada pra fazer. Agora só reporta falha estrutural real
+// (appEl ausente); "nada pra atualizar aqui" conta como sucesso.
 function patchOnlineStatusDom(otherId, online) {
   if (!appEl) return false;
-  var touched = false;
   appEl.querySelectorAll('[data-open-author="'+otherId+'"] [data-online-dot]').forEach(function(dot) {
     dot.style.display = online ? "block" : "none";
-    touched = true;
   });
   if (state.page === "msgs" && state.activeConvoId) {
     var conv = CONVOS.find(function(c){ return c.id === state.activeConvoId; });
     if (conv && conv.userId === otherId) {
       var indicator = appEl.querySelector("[data-online-indicator]");
-      if (indicator) { indicator.textContent = online ? "Online agora" : "Offline"; touched = true; }
+      if (indicator) indicator.textContent = online ? "Online agora" : "Offline";
     }
   }
-  return touched;
+  return true;
 }
 
 // ✓✓ Atualiza SÓ os "tiquinhos" (enviada/visualizada) das mensagens já na
 // tela, sem reconstruir a conversa inteira — evita o "pisca" e qualquer
 // chance de fechar um menu/painel aberto por baixo do usuário.
+// 🩹 FIX (piscar constante): igual ao patchOnlineStatusDom acima — esta
+// função reportava "falhou" sempre que o "visto" mudava mas nenhum tique
+// na tela precisava mudar de aparência (ex.: já estava mostrando "lida"),
+// o que forçava um render() completo (o "pisca") a cada ~2,5s em qualquer
+// conversa ativa, mesmo sem nada de fato mudando visualmente. Agora só
+// reporta falha quando de fato não dá pra fazer o patch aqui.
 function patchReadReceiptsInPlace(convoId) {
-  if (!appEl || state.page !== "msgs" || state.activeConvoId !== convoId) return false;
+  if (!appEl || state.page !== "msgs" || state.activeConvoId !== convoId) return true; // nada visível pra atualizar — não é falha
   var chatBox = appEl.querySelector("[data-chat-msgs]");
-  if (!chatBox) return false;
+  if (!chatBox) return false; // aqui sim: deveria ter a lista na tela e não tem
   var conv = CONVOS.find(function(c){ return c.id === convoId; });
   var chat = getChat(convoId);
-  var touched = false;
   chatBox.querySelectorAll(".msg-card.sent[data-msg-id]").forEach(function(card) {
     var id = card.getAttribute("data-msg-id");
     var m = chat.find(function(x){ return x.id === id; });
@@ -6183,9 +6192,9 @@ function patchReadReceiptsInPlace(convoId) {
     var timeEl = card.querySelector(".msg-time");
     if (!timeEl) return;
     var newHtml = esc(m.time) + (status ? renderMsgStatusIcon(status) : "");
-    if (timeEl.innerHTML !== newHtml) { timeEl.innerHTML = newHtml; touched = true; }
+    if (timeEl.innerHTML !== newHtml) timeEl.innerHTML = newHtml;
   });
-  return touched;
+  return true;
 }
 
 var CHAT_SWIPE_THRESHOLD = 56; // px para disparar o modo "responder"
@@ -6199,6 +6208,15 @@ var CHAT_SWIPE_MAX = 80;       // limite visual do arrasto
 // nos cards recém-adicionados sem reconstruir a tela inteira — sem isso,
 // mensagens que chegassem via patch ficariam sem esses dois gestos até a
 // próxima reconstrução completa acontecer por outro motivo.
+// 🩹 FIX (reação sensível, parte 2): o cancelamento por distância do dedo
+// (>10px na vertical) não pegava rolagens LENTAS — arrastar a lista devagar
+// podia levar mais de 400ms pra passar de 10px, e o menu de reagir abria no
+// meio do scroll mesmo assim. Esta variável guarda a função de cancelar o
+// toque-longo PENDENTE (se houver), pra que um listener de 'scroll' de
+// verdade na lista (mais abaixo) possa cancelá-lo assim que a lista rolar
+// de fato — não importa a velocidade do arrasto.
+var _msgPressCancelActive = null;
+
 function bindMsgElementSwipe(msgEl) {
   var pressTimer = null;
   var swipeEl = msgEl.querySelector('[data-msg-swipe]');
@@ -6220,6 +6238,7 @@ function bindMsgElementSwipe(msgEl) {
         if (msg) showMessageContextMenu(msg.id, msg.text || msg.content || '', msgEl);
       }
     }, 400);
+    _msgPressCancelActive = function() { clearTimeout(pressTimer); };
   }
 
   function onMove(x, y) {
@@ -6232,6 +6251,14 @@ function bindMsgElementSwipe(msgEl) {
       clearTimeout(pressTimer);
       if (swipeEl) swipeEl.classList.add('dragging');
     }
+    // 🩹 FIX: cancela o toque-longo (menu de reagir) assim que o dedo se
+    // mover majoritariamente na VERTICAL — antes só cancelava em swipe
+    // horizontal, então rolar a lista de mensagens segurando o dedo por
+    // mais de 400ms abria o menu de reação no meio do scroll, mesmo sem
+    // nenhuma intenção de reagir.
+    if (!isSwipe && Math.abs(diffY) > 10) {
+      clearTimeout(pressTimer);
+    }
     if (!isSwipe) return;
     // Mensagens enviadas ("sent") deslizam para a esquerda, recebidas para a direita
     var allowed = msgEl.classList.contains('sent') ? Math.min(0, diffX) : Math.max(0, diffX);
@@ -6242,6 +6269,7 @@ function bindMsgElementSwipe(msgEl) {
 
   function onEnd() {
     clearTimeout(pressTimer);
+    _msgPressCancelActive = null;
     dragging = false;
     if (swipeEl) swipeEl.classList.remove('dragging');
     if (isSwipe && Math.abs(dx) >= CHAT_SWIPE_THRESHOLD) {
@@ -6363,6 +6391,15 @@ function patchChatMessagesInPlace(convoId) {
   bindAudioPlayback();
 
   if (wasNearBottom) scrollChatToBottom();
+  // 🩹 FIX (auto-scroll perdido): sem esta linha, o patch rápido (aqui em
+  // cima) atualizava a tela mas NUNCA avisava o render() completo de que
+  // novas mensagens já tinham sido mostradas. Da próxima vez que qualquer
+  // outro motivo disparasse um render() cheio (reação, "visto" mudando
+  // sem dar pra aplicar patch, etc.), ele comparava a contagem de
+  // mensagens com um número desatualizado e podia decidir errado se
+  // devia ou não rolar pro fim — essa contabilidade errada é a causa mais
+  // provável de mensagem nova "chegar" sem a tela descer sozinha.
+  _lastRenderedMsgCount[convoId] = chat.length;
   return true;
 }
 
@@ -8811,6 +8848,19 @@ function _mimiUnlockAudio() {
   });
 }
 document.addEventListener('touchstart', _mimiUnlockAudio, { once:true, passive:true });
+
+// 🩹 FIX (reação sensível, parte 2 — continuação): 'scroll' não borbulha
+// (bubble), então usa a fase de captura no document pra pegar o evento de
+// QUALQUER lista de mensagens rolando, mesmo com o DOM sendo recriado a
+// cada render. Assim que a lista rolar de verdade, cancela o toque-longo
+// pendente na hora — cobre inclusive arrastos lentos que o cálculo de
+// distância do dedo (>10px) podia não pegar a tempo.
+document.addEventListener('scroll', function(e) {
+  if (_msgPressCancelActive && e.target && e.target.hasAttribute && e.target.hasAttribute('data-chat-msgs')) {
+    _msgPressCancelActive();
+    _msgPressCancelActive = null;
+  }
+}, true);
 document.addEventListener('click', _mimiUnlockAudio, { once:true });
 
 // ─── POST CARD ───────────────────────────────────────────────
