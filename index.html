@@ -6496,8 +6496,21 @@ function _mergeIncomingMessages(convoId, msgs) {
   var changed = false;
   msgs.forEach(function(m) {
     try {
-      var existing = chat.find(function(c){ return c._firestoreId === m._id; });
+      // 🩹 FIX: casar também pelo "id" local, não só por "_firestoreId". O
+      // eco otimista da própria mensagem enviada nasce com _firestoreId
+      // null (só é preenchido quando a resposta do envio via REST volta).
+      // Só que o doc do Firestore é salvo com esse MESMO id (ver
+      // FB.sendMessage), e o listener em tempo real costuma avisar da
+      // mensagem ANTES dessa resposta do REST chegar. Casando só por
+      // "_firestoreId", essa corrida fazia a própria mensagem que você
+      // acabou de mandar não ser reconhecida como já existente — criava
+      // uma segunda cópia dela no histórico, com o mesmo _firestoreId, e
+      // isso é o que estava fazendo patchChatMessagesInPlace() desistir
+      // (a lista deixava de "bater" mensagem a mensagem) e cair pro
+      // re-render completo da tela toda vez — o "piscar".
+      var existing = chat.find(function(c){ return c._firestoreId === m._id || c.id === m._id; });
       if (existing && m._id) {
+        if (!existing._firestoreId) existing._firestoreId = m._id;
         // Mensagem já conhecida — só nos interessa se ela foi apagada
         // "para todos" nesse meio tempo (o poll incremental não pega
         // edições de mensagens antigas, então isso só reflete quando a
