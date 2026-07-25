@@ -6814,7 +6814,21 @@ function _mergeIncomingMessages(convoId, msgs) {
           time: new Date(createdAt).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}),
           replyTo: m.replyTo || null,
         };
-        chat.push(msgObj);
+        // 🩹 FIX (piscar assimétrico): antes sempre dava chat.push() no
+        // fim, assumindo que mensagem nova = mensagem mais recente. Mas o
+        // onSnapshot pode entregar mudanças fora de ordem (ex.: snapshot
+        // inicial com a conversa toda, ou duas mensagens quase simultâneas
+        // dos dois lados chegando em ordem trocada) — aí a mensagem "nova"
+        // podia ser mais antiga que a última já no array, e o push() no
+        // fim deixava o histórico local fora de ordem cronológica. Isso
+        // quebrava a checagem de ordem do patchChatMessagesInPlace() (que
+        // compara card a card, na ordem) e derrubava pro re-render
+        // completo — o "piscar". Agora insere na posição certa, mantendo
+        // o array sempre ordenado por createdAt, igual ao carregamento
+        // inicial via REST.
+        var _insertAt = chat.length;
+        while (_insertAt > 0 && (chat[_insertAt-1].createdAt || "") > (msgObj.createdAt || "")) _insertAt--;
+        chat.splice(_insertAt, 0, msgObj);
         changed = true;
       }
     } catch (e) {
@@ -6891,6 +6905,16 @@ function attachRealtimeMessages(convoId) {
   try {
     _rtUnsub = firebase.firestore()
       .collection("convos").doc(convoId).collection("messages")
+      // 🩹 FIX (piscar assimétrico + mensagem não instantânea): sem
+      // orderBy, o Firestore entrega docChanges() em ordem arbitrária
+      // (não cronológica) — principalmente no snapshot inicial, que lista
+      // TODA a conversa de uma vez. Isso fazia mensagens serem inseridas
+      // fora de ordem no array local, o que quebrava a checagem de ordem
+      // do patchChatMessagesInPlace() e derrubava pro backgroundRender()
+      // completo a cada mudança — daí o "piscar" mais forte e desigual
+      // entre os dois lados (cada aparelho recebe a ordem "errada" de um
+      // jeito diferente, dependendo da rede/timing).
+      .orderBy("createdAt")
       .onSnapshot(function(snapshot) {
         _rtActiveConvoId = convoId; // primeira notificação confirma que o listener está de fato entregando dados
         _updateRtIndicator();
