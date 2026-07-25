@@ -4181,10 +4181,22 @@ function _fsSetFirebase(path, data, merge) {
 // enfileira pra sincronizar de volta assim que possível.
 function fsSet(path, data, merge) {
   if (typeof SupabaseDB === "undefined") return _fsSetFirebase(path, data, merge);
-  return SupabaseDB.mirror.set(path, data, merge).then(function(res){
-    _mirrorSetToFirebase(path, data, merge);
-    return res;
-  }).catch(function(err){
+  // 🚀 FIX (mensagem/status ainda chegando com atraso perceptível pro
+  // outro usuário): antes, a réplica pro Firebase (_mirrorSetToFirebase)
+  // só COMEÇAVA depois que o Supabase confirmava a escrita — ou seja,
+  // dois round-trips de rede em série (Supabase, depois Firebase) antes
+  // da mensagem existir no Firebase. Como o onSnapshot() em tempo real
+  // (o que avisa o OUTRO celular instantaneamente) só vê o dado quando
+  // ele chega no Firebase, não no Supabase, isso significava que quem
+  // recebe só era avisado depois da SOMA dos dois tempos de rede, um
+  // atrás do outro — um atraso real, não só percepção.
+  // Agora as duas escritas saem JUNTAS, em paralelo: pro remetente nada
+  // muda (a confirmação "enviada" continua vindo do Supabase, que é
+  // quem esse fsSet() devolve), mas o outro lado passa a ver a
+  // mensagem/o "visto" chegar assim que o Firebase responder sozinho,
+  // sem esperar o Supabase terminar primeiro.
+  _mirrorSetToFirebase(path, data, merge);
+  return SupabaseDB.mirror.set(path, data, merge).catch(function(err){
     console.warn("⚠️ fsSet('"+path+"') falhou no Supabase, tentando salvar no Firebase:", err && err.message || err);
     if (_isFirebaseThrottled()) return Promise.reject(err);
     return _fsSetFirebase(path, data, merge).then(function(res){
