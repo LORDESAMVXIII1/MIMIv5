@@ -6977,12 +6977,48 @@ function attachRealtimeConvoList() {
       .onSnapshot(function(snapshot) {
         var myId = ME_ID;
         var changed = false;
+        // 🩹 FIX (pisca residual + "visto" atrasado): enquanto o chat está
+        // aberto, o app grava a cada 3s um timestamp de "eu vi essa
+        // conversa" (markConvoRead). Isso atualiza o doc "convos/{id}" e
+        // dispara ESTE listener nos DOIS celulares (os dois são membros da
+        // conversa) — e antes, qualquer mudança aqui, mesmo só o "visto"
+        // sincronizando, chamava sempre o backgroundRender() COMPLETO. Ou
+        // seja: só de manter o chat aberto já reconstruía a tela inteira a
+        // cada ~3s dos dois lados, sem nenhuma mensagem nova. Isso também
+        // atrasava o tique de "visualizado", porque o render completo tem
+        // guardas que adiam ele (ex.: enquanto a pessoa está digitando).
+        // Agora: se a ÚNICA coisa que mudou nesse doc for até onde a outra
+        // pessoa já viu (otherLastRead) — e essa é a conversa que já está
+        // aberta na tela — só remenda os tiquinhos no lugar
+        // (patchReadReceiptsInPlace, que não tem essas guardas). Qualquer
+        // outra mudança de verdade (mensagem, tema, convite de jogo, etc.)
+        // continua caindo pro backgroundRender() completo normalmente.
+        var readOnlyConvoIds = [];
         snapshot.docChanges().forEach(function(change) {
           if (change.type === "removed") return;
           var d = change.doc.data() || {};
           d._id = change.doc.id;
-          if (_applyConvoDoc(d, myId)) changed = true;
+          var convBefore = CONVOS.find(function(c){ return c.id === d._id; });
+          var prev = convBefore ? {
+            lastTime: convBefore._lastTimeRaw, theme: convBefore.theme,
+            maze: convBefore.activeMazeRoomId, tictac: convBefore.activeTicTacRoomId,
+            otherRead: convBefore.otherLastRead
+          } : null;
+          if (!_applyConvoDoc(d, myId)) return;
+          var convAfter = prev && CONVOS.find(function(c){ return c.id === d._id; });
+          var onlyReadChanged = prev && convAfter &&
+            convAfter._lastTimeRaw === prev.lastTime &&
+            convAfter.theme === prev.theme &&
+            convAfter.activeMazeRoomId === prev.maze &&
+            convAfter.activeTicTacRoomId === prev.tictac &&
+            convAfter.otherLastRead !== prev.otherRead;
+          if (onlyReadChanged && state.page === "msgs" && state.activeConvoId === d._id) {
+            readOnlyConvoIds.push(d._id);
+          } else {
+            changed = true;
+          }
         });
+        readOnlyConvoIds.forEach(function(id) { patchReadReceiptsInPlace(id); });
         if (changed) backgroundRender();
       }, function(err) {
         // Erro do listener (ex.: Rules bloqueando, rede) — desliga só o
