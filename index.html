@@ -3152,7 +3152,26 @@ function applyChatTheme(convoId, themeKey) {
   });
 }
 
-function getChat(cid) {
+// 🩹 FIX (mensagem some e só volta segundos depois): getChat() sempre
+// devolvia um array NOVO (o resultado de .filter()), nunca o array real
+// guardado em chatHistories. Toda vez que uma função de ENVIO fazia
+// `var chat = getChat(...); chat.push(novaMensagem);`, esse push ia pro
+// array descartável — nunca chegava a entrar em chatHistories de verdade.
+// A mensagem só aparecia na hora porque o card era inserido direto no DOM
+// "por fora"; visualmente parecia enviada. Mas no próximo render() completo
+// (disparado por qualquer coisa — reação, "visto", outra mensagem), a tela
+// era reconstruída a partir de chatHistories de verdade, que NUNCA tinha
+// essa mensagem — e ela sumia. Só reaparecia quando o eco da própria
+// mensagem chegava de volta via tempo real/polling e entrava pelo caminho
+// certo (_mergeIncomingMessages, que já usava chatHistories[convoId]
+// diretamente). Esse "sumir e voltar" ficou mais visível agora que reduzimos
+// os renders completos desnecessários — antes, um render tão frequente
+// "corrigia" o sumiço rápido demais pra perceber.
+// _chatRaw() devolve o array DE VERDADE (mesma referência salva em
+// chatHistories), pra qualquer código que precise inserir mensagem nele.
+// getChat() continua sendo a view filtrada (sem mensagens apagadas "pra
+// mim"), só para LEITURA/renderização — nunca pra dar push/splice.
+function _chatRaw(cid) {
   if (!chatHistories[cid]) {
     chatHistories[cid] = [
       { id:1, me:false, type:"text", text:"Oi! Que legal seu projeto!", time:"14:22" },
@@ -3160,7 +3179,10 @@ function getChat(cid) {
       { id:3, me:false, type:"text", text:"Quando vai lançar?",           time:"14:24" },
     ];
   }
-  return chatHistories[cid].filter(function(m){ return !_hiddenMsgIds[m.id]; });
+  return chatHistories[cid];
+}
+function getChat(cid) {
+  return _chatRaw(cid).filter(function(m){ return !_hiddenMsgIds[m.id]; });
 }
 
 var EXPLORE_IMGS = [
@@ -11075,7 +11097,7 @@ function bindMsgsPage() {
   function sendChatMediaViaCloudinary(cloudinaryUrl, mediaType) {
     var msgId = uid();
     var createdAt = new Date().toISOString();
-    var chat = getChat(state.activeConvoId);
+    var chat = _chatRaw(state.activeConvoId);
     var msgObj = { id:msgId, _firestoreId:msgId, me:true, type:mediaType, src:cloudinaryUrl, createdAt:createdAt, time:_relTime(createdAt) };
     chat.push(msgObj);
     
@@ -11147,7 +11169,7 @@ function bindMsgsPage() {
   function sendChatSticker(sticker) {
     var msgId = uid();
     var createdAt = new Date().toISOString();
-    var chat = getChat(state.activeConvoId);
+    var chat = _chatRaw(state.activeConvoId);
     var msgObj = { id:msgId, _firestoreId:msgId, me:true, type:"sticker", src:sticker.src, createdAt:createdAt, time:_relTime(createdAt) };
     chat.push(msgObj);
 
@@ -11341,7 +11363,7 @@ function bindMsgsPage() {
   function sendMedia(dataUrl, kind) {
     var msgId = uid();
     var createdAt = new Date().toISOString();
-    var chat = getChat(state.activeConvoId);
+    var chat = _chatRaw(state.activeConvoId);
     
     var msgObj = { id:msgId, _firestoreId:msgId, me:true, type:kind, src:dataUrl, createdAt:createdAt, time:_relTime(createdAt) };
     chat.push(msgObj);
@@ -11688,7 +11710,7 @@ function sendChatMessage() {
   if (!text) return;
   
   var localId = uid();
-  var chat = getChat(state.activeConvoId);
+  var chat = _chatRaw(state.activeConvoId);
 
   // Se houver uma mensagem marcada via swipe para responder, anexa a citação
   var replySt = getReplyState(state.activeConvoId);
@@ -11818,7 +11840,7 @@ function sendLoveLetter(text) {
   if (!state.activeConvoId) return;
   var msgId = uid();
   var createdAt = new Date().toISOString();
-  var chat = getChat(state.activeConvoId);
+  var chat = _chatRaw(state.activeConvoId);
   var msgObj = { id:msgId, _firestoreId:null, me:true, type:"letter", text:text, createdAt:createdAt, time:nowTime() };
   chat.push(msgObj);
 
@@ -12034,7 +12056,7 @@ function sendMazeInvite() {
     createdAt: createdAt
   };
 
-  var chat = getChat(state.activeConvoId);
+  var chat = _chatRaw(state.activeConvoId);
   var msgObj = { id:msgId, _firestoreId:null, me:true, type:"maze", roomId:roomId, createdAt:createdAt, time:nowTime() };
   chat.push(msgObj);
   // FIX: marca esta sala como a única válida da conversa. É o que permite
@@ -12573,7 +12595,7 @@ function sendTicTacInvite() {
     createdAt: createdAt
   };
 
-  var chat = getChat(state.activeConvoId);
+  var chat = _chatRaw(state.activeConvoId);
   var msgObj = { id:msgId, _firestoreId:null, me:true, type:"tictac", roomId:roomId, createdAt:createdAt, time:nowTime() };
   chat.push(msgObj);
   // Mesma proteção já aplicada no labirinto: só o convite mais recente da
@@ -13206,7 +13228,7 @@ function beginAudioRecording(stream) {
       return;
     }
     cloudinaryWidget.uploadAudioBlobToCloudinary(blob, function(cloudinaryUrl) {
-      var chat = getChat(_targetConvoId);
+      var chat = _chatRaw(_targetConvoId);
       var _audioCreatedAt = new Date().toISOString();
       var msgObj = { id:uid(), _firestoreId:null, me:true, type:"audio", src:cloudinaryUrl, duration:duration, time:nowTime(), createdAt:_audioCreatedAt };
       chat.push(msgObj);
