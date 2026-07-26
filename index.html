@@ -2572,6 +2572,25 @@ function syncMyFollowersFromRefs() {
   });
 }
 
+// Tenta gravar/apagar o registro de follow (fonte de verdade) mais de uma
+// vez antes de desistir — cobre instabilidades passageiras de rede/token,
+// que antes faziam o follow "sumir" silenciosamente do lado de quem
+// seguiu (ver toggleFollow: sem isso, um erro aqui só ia pro console e
+// a pessoa continuava vendo "Seguindo" na tela mesmo sem ter sido salvo).
+function _followRefWriteWithRetry(fn, attempts) {
+  attempts = attempts || 2;
+  function tryOnce(n) {
+    return fn().catch(function(err) {
+      if (n < attempts) {
+        return new Promise(function(resolve) { setTimeout(resolve, 1200); })
+          .then(function() { return tryOnce(n + 1); });
+      }
+      return Promise.reject(err);
+    });
+  }
+  return tryOnce(1);
+}
+
 function toggleFollow(targetId) {
   var me = USERS[ME_ID];
   var idx = me.following.indexOf(targetId);
@@ -2604,12 +2623,31 @@ function toggleFollow(targetId) {
     // `followers` dele direto (bloqueado), eu só grava/apago o MEU
     // próprio registro dentro da subcoleção dele.
     if (nowFollowing) {
-      fsSet(followerRefPath(targetId, ME_ID), { uid: ME_ID, followedAt: Date.now() }).catch(function(err){
-        console.warn("⚠️ Não foi possível registrar follow em users/"+targetId+"/followerRefs:", err && err.message || err);
+      _followRefWriteWithRetry(function() {
+        return fsSet(followerRefPath(targetId, ME_ID), { uid: ME_ID, followedAt: Date.now() });
+      }).catch(function(err) {
+        console.warn("⚠️ Não foi possível registrar follow em users/"+targetId+"/followerRefs, mesmo após tentar de novo:", err && err.message || err);
+        // FIX: sem isso, a UI continuava mostrando "Seguindo" mesmo quando
+        // a gravação real falhou de vez — a pessoa achava que seguia,
+        // mas o registro nunca existiu no lado de quem foi seguido.
+        // Desfaz o estado otimista e avisa, pra ninguém ficar com uma
+        // falsa impressão de "Seguindo" que não foi salva de verdade.
+        var idx2 = me.following.indexOf(targetId);
+        if (idx2 !== -1) me.following.splice(idx2, 1);
+        if (target) {
+          var fidx2 = target.followers.indexOf(ME_ID);
+          if (fidx2 !== -1) target.followers.splice(fidx2, 1);
+        }
+        fsSet("users/"+ME_ID, { following: me.following }).catch(function(){});
+        showToast("Não foi possível seguir agora. Verifique sua conexão e tente de novo.");
+        render();
       });
     } else {
-      fsDelete(followerRefPath(targetId, ME_ID)).catch(function(err){
-        console.warn("⚠️ Não foi possível remover follow em users/"+targetId+"/followerRefs:", err && err.message || err);
+      _followRefWriteWithRetry(function() {
+        return fsDelete(followerRefPath(targetId, ME_ID));
+      }).catch(function(err) {
+        console.warn("⚠️ Não foi possível remover follow em users/"+targetId+"/followerRefs, mesmo após tentar de novo:", err && err.message || err);
+        showToast("Não foi possível deixar de seguir agora. Tente de novo.");
       });
     }
   }
@@ -14529,16 +14567,7 @@ function bindProfilePage(userId) {
   var followBtn = appEl.querySelector("[data-toggle-follow]");
   if (followBtn) followBtn.addEventListener("click", function() {
     var targetId = followBtn.getAttribute("data-toggle-follow");
-    var wasFollowing = isFollowing(targetId);
     toggleFollow(targetId);
-    // Se o perfil sendo visualizado é de outro usuário que começou a seguir você
-    // Simula notificação: quando você segue alguém, eles "te seguem de volta" (demo)
-    if (!wasFollowing && targetId !== ME_ID) {
-      // Notifica como se o target te seguisse de volta após 2s (demo simulado)
-      setTimeout(function() {
-        addNotif("follow", targetId, "começou a te seguir", ME_ID);
-      }, 2000);
-    }
     render();
   });
 
