@@ -9870,13 +9870,19 @@ function bindPostCardEvents() {
       syncReactionButtons(post);
       btn.classList.add("fire-pop");
       setTimeout(function(){ btn.classList.remove("fire-pop"); }, 220);
-      queueFireWrite(pid, post.fireTotal, post.fireDaily).catch(function(){
+      queueFireWrite(pid, post.fireTotal, post.fireDaily).catch(function(err){
         // A escrita falhou de verdade (não só atraso) — desfaz o toque
         // otimista pra tela não mentir sobre o que está salvo.
         entry.count = Math.max(0, entry.count - 1);
         post.fireTotal = Math.max(0, (post.fireTotal || 0) - 1);
         syncReactionButtons(post);
-        showToast(toastWithIcon("Não deu pra salvar sua reação agora. Tente de novo.", "warning", "before"), true);
+        // TEMP DEBUG: mostra a mensagem de erro real no toast (não só
+        // "tente de novo") pra dar pra diagnosticar direto pelo celular,
+        // sem precisar de DevTools/console remoto. Remover depois de
+        // identificar a causa raiz.
+        var rawMsg = (err && (err.message || err.status || String(err))) || "erro desconhecido";
+        console.error("🔥 firePost falhou:", err);
+        showToast(toastWithIcon("Fogo não salvou: " + rawMsg, "warning", "before"), true);
       });
     });
   });
