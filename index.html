@@ -5171,12 +5171,23 @@ var FB = {
   },
 
   // Sincroniza a reação de 🔥: o limite diário (5x/dia por publicação no
-  // plano gratuito) é controlado no cliente antes de chamar isso; aqui só
-  // gravamos o novo total. fireTotal é um contador simples (soma de todos
-  // os toques de todo mundo), não uma lista de usuários.
-  firePost: function(pid, newTotal) {
-    if (!_idToken) return;
-    fsSet("posts/"+pid, { fireTotal: newTotal }).catch(function(){});
+  // plano gratuito) é controlado no cliente antes de chamar isso; aqui
+  // gravamos o novo total E o fireDaily (contador por usuário/dia — antes
+  // só o fireTotal era salvo, então o limite diário "esquecia" tudo a
+  // cada refresh). fireTotal é um contador simples (soma de todos os
+  // toques de todo mundo), não uma lista de usuários.
+  // IMPORTANTE: não engolimos mais o erro aqui — se a escrita falhar
+  // (rede, permissão, etc.), quem chamou precisa saber pra desfazer o
+  // incremento otimista na tela, senão o número "mentiroso" só se revela
+  // depois, quando o usuário atualiza o app.
+  firePost: function(pid, newTotal, fireDaily) {
+    if (!_idToken) return Promise.reject(new Error("sem token"));
+    var data = { fireTotal: newTotal };
+    if (fireDaily) data.fireDaily = fireDaily;
+    return fsSet("posts/"+pid, data).catch(function(err){
+      console.error("⚠️ firePost('"+pid+"') falhou ao salvar no servidor:", err && err.message || err);
+      throw err;
+    });
   },
 
   // ── STORIES ───────────────────────────────────────────────
@@ -9818,6 +9829,25 @@ function bindPostCardEvents() {
       }
     });
   });
+  // Fila de escrita por post: se o usuário tocar no foguinho várias vezes
+  // rápido, cada toque disparava uma chamada de rede independente e sem
+  // await. Como o total local (post.fireTotal) já ia pra 1,2,3,4,5 na
+  // hora, mas as 5 requisições podiam CHEGAR ao servidor fora de ordem
+  // (rede móvel), uma resposta atrasada com um total menor podia
+  // sobrescrever uma mais nova — o servidor ficava com um número menor
+  // (às vezes até voltando perto de 0) do que o que apareceu na tela.
+  // Um refresh então mostrava o valor real (baixo) do servidor, dando a
+  // impressão de que "sumiu tudo". Encadear as escritas garante que elas
+  // cheguem ao servidor na mesma ordem dos toques.
+  var _fireWriteChain = {};
+  function queueFireWrite(pid, newTotal, fireDaily) {
+    var prev = _fireWriteChain[pid] || Promise.resolve();
+    var next = prev.catch(function(){}).then(function(){
+      return FB.firePost(pid, newTotal, fireDaily);
+    });
+    _fireWriteChain[pid] = next;
+    return next;
+  }
   appEl.querySelectorAll("[data-fire]").forEach(function(btn) {
     btn.addEventListener("click", function() {
       var pid = btn.getAttribute("data-fire");
@@ -9837,10 +9867,17 @@ function bindPostCardEvents() {
       var entry = getMyFireToday(post);
       entry.count++;
       post.fireTotal = (post.fireTotal || 0) + 1;
-      FB.firePost(pid, post.fireTotal);
       syncReactionButtons(post);
       btn.classList.add("fire-pop");
       setTimeout(function(){ btn.classList.remove("fire-pop"); }, 220);
+      queueFireWrite(pid, post.fireTotal, post.fireDaily).catch(function(){
+        // A escrita falhou de verdade (não só atraso) — desfaz o toque
+        // otimista pra tela não mentir sobre o que está salvo.
+        entry.count = Math.max(0, entry.count - 1);
+        post.fireTotal = Math.max(0, (post.fireTotal || 0) - 1);
+        syncReactionButtons(post);
+        showToast(toastWithIcon("Não deu pra salvar sua reação agora. Tente de novo.", "warning", "before"), true);
+      });
     });
   });
   appEl.querySelectorAll("[data-save]").forEach(function(btn) {
