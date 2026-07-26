@@ -6770,6 +6770,72 @@ function stopStoryPolling() {
   if (_storyPollInterval) { clearInterval(_storyPollInterval); _storyPollInterval = null; }
 }
 
+// ── POLLING DE REAÇÕES DOS POSTS (foguinho/curtida, a cada 15s) ──
+// BUG: quando alguém reagia com 🔥 ou curtia uma publicação, o total
+// (fireTotal/likedBy) era gravado no Firestore normalmente, mas os
+// outros usuários que já tinham aquele post carregado na tela nunca
+// viam o número mudar — loadPosts() só era chamado uma vez, no login/
+// reconexão, e nunca mais de novo enquanto o app ficava aberto (ao
+// contrário de notificações, stories e mensagens, que já tinham
+// polling). Resultado: a reação só aparecia pra quem desse reload
+// completo no app. Isto adiciona o mesmo padrão de polling incremental
+// já usado acima, só que atualiza os contadores no DOM em vez de
+// reconstruir a tela inteira (evita reiniciar vídeos do feed em
+// reprodução, mesmo motivo do syncReactionButtons()).
+var _postsReactionPollInterval = null;
+function startPostsReactionPolling() {
+  stopPostsReactionPolling();
+  if (!_idToken || !_fbUid) return;
+  _postsReactionPollInterval = setInterval(function() {
+    if (!_idToken || !_fbUid) { stopPostsReactionPolling(); return; }
+    syncPostsReactionsFromServer();
+  }, 15000);
+}
+function stopPostsReactionPolling() {
+  if (_postsReactionPollInterval) { clearInterval(_postsReactionPollInterval); _postsReactionPollInterval = null; }
+}
+function syncPostsReactionsFromServer() {
+  if (!_idToken) return;
+  fsList("posts").then(function(docs) {
+    if (!docs || !docs.length) return;
+    var changed = false;
+    docs.forEach(function(d) {
+      var local = posts.find(function(p){ return p.id === d._id; });
+      if (!local) return; // post novo (ainda não carregado) — fica pro próximo loadPosts()
+      var newFire = d.fireTotal || 0;
+      var newLikedBy = d.likedBy || [];
+      if (newFire !== (local.fireTotal || 0)) { local.fireTotal = newFire; changed = true; }
+      if (newLikedBy.length !== local.likedBy.length || newLikedBy.some(function(uidV){ return local.likedBy.indexOf(uidV) === -1; })) {
+        local.likedBy = newLikedBy;
+        changed = true;
+      }
+    });
+    if (changed) patchPostReactionsInPlace();
+  }).catch(function(){});
+}
+// Atualiza só o número e a classe "ativo" dos botões de curtir/foguinho
+// já visíveis na tela, sem tocar no resto do card (sem recriar <video>,
+// sem fechar nada que esteja aberto) — mesmo espírito de
+// patchOnlineStatusDom()/patchReadReceiptsInPlace() acima.
+function patchPostReactionsInPlace() {
+  if (!appEl) return false;
+  posts.forEach(function(post) {
+    var likeBtn = appEl.querySelector('[data-like="'+post.id+'"]');
+    if (likeBtn) {
+      likeBtn.classList.toggle("liked", postIsLiked(post));
+      var likeCountEl = likeBtn.querySelector('[data-like-count="'+post.id+'"]');
+      if (likeCountEl) likeCountEl.textContent = fmtNum(postLikeCount(post));
+    }
+    var fireBtn = appEl.querySelector('[data-fire="'+post.id+'"]');
+    if (fireBtn) {
+      fireBtn.classList.toggle("fired", postMyFireCount(post) > 0);
+      var fireCountEl = fireBtn.querySelector('[data-fire-count="'+post.id+'"]');
+      if (fireCountEl) fireCountEl.textContent = fmtNum(postFireCount(post));
+    }
+  });
+  return true;
+}
+
 // ── LIMPEZA AUTOMÁTICA DE MENSAGENS (retenção de 3 dias) ──────────
 // Pedido do usuário: nenhuma mensagem — texto, foto, vídeo, áudio,
 // figurinha, carta, convite de jogo, etc. — deve continuar existindo
@@ -16532,6 +16598,7 @@ function onAuthSuccess(u) {
   // ── Presença ─────────────────────────────────────────
   startPresence();
   startStoryPolling();
+  startPostsReactionPolling();
   attachRealtimeConvoList(); // tempo real se disponível; senão cai pro polling REST
 
   // ── Notificações reais (substitui as demo) ────────────
@@ -17631,6 +17698,7 @@ function checkAgeVerificationLinkFromUrl() {
         // ── 3. Presença online ────────────────────────────────
         startPresence();
         startStoryPolling();
+        startPostsReactionPolling();
         attachRealtimeConvoList(); // tempo real se disponível; senão cai pro polling REST
 
         // ── 4. Notificações ──────────────────────────────────
