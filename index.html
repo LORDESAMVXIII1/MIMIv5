@@ -4853,7 +4853,7 @@ var FB = {
     }).catch(function(){});
   },
 
-  register: function(email, pw, name) {
+  register: function(email, pw, name, birthdate) {
     return fetch(FIRE_AUTH+":signUp?key="+CFG.apiKey, {
       method:"POST", headers: idpHeaders(),
       body: JSON.stringify({ email:email, password:pw, returnSecureToken:true })
@@ -4864,7 +4864,7 @@ var FB = {
       _idToken = d.idToken;
       _fbUid   = d.localId;
       _refreshToken = d.refreshToken || null;
-      return FB._loadOrCreateUser(d.localId, d.email, name||d.email.split("@")[0]);
+      return FB._loadOrCreateUser(d.localId, d.email, name||d.email.split("@")[0], birthdate);
     });
   },
 
@@ -4937,7 +4937,7 @@ var FB = {
   },
 
   // carrega perfil do Firestore ou cria um novo
-  _loadOrCreateUser: function(uid, email, name) {
+  _loadOrCreateUser: function(uid, email, name, birthdate) {
     // Antes de ler, tenta reenviar pro Firebase qualquer alteração do
     // PRÓPRIO perfil que ficou pendente (ex.: troca de foto/capa que só
     // chegou a salvar no Supabase) — evita que a leitura a seguir traga
@@ -4968,6 +4968,7 @@ var FB = {
       var newUser = {
         uid:uid, name:name, username:"@"+name.toLowerCase().replace(/\s+/g,""),
         email: email,
+        birthdate: birthdate || null,
         avatar:"https://api.dicebear.com/7.x/avataaars/svg?seed="+uid+"&backgroundColor=ffd6e8",
         cover:null, bio:"", location:"", website:"", joined: new Date().toLocaleDateString("pt-BR",{month:"short",year:"numeric"}),
         verified:false, followers:[], following:[]
@@ -16367,6 +16368,10 @@ function renderAuthPage() {
           '<span class="auth-input-icon">'+icoSvg("user",18,"var(--sub)")+'</span>' +
           '<input class="input" placeholder="Nome completo" data-field="name">' +
         '</div>') : "") +
+        (authMode==="register" ? ('<div class="auth-input-wrap">'+
+          '<span class="auth-input-icon">'+icoSvg("user",18,"var(--sub)")+'</span>' +
+          '<input class="input" type="date" placeholder="Data de nascimento" data-field="birthdate" max="'+new Date().toISOString().slice(0,10)+'">' +
+        '</div>') : "") +
         '<div class="auth-input-wrap">' +
           '<span class="auth-input-icon">'+icoSvg("mail",18,"var(--sub)")+'</span>' +
           '<input class="input" type="email" placeholder="Email" data-field="email">' +
@@ -16518,14 +16523,24 @@ function bindAuthPage() {
     var emailEl = appEl.querySelector('[data-field="email"]');
     var pwEl = appEl.querySelector('[data-field="pw"]');
     var nameEl = appEl.querySelector('[data-field="name"]');
+    var birthdateEl = appEl.querySelector('[data-field="birthdate"]');
     var email = emailEl ? emailEl.value.trim() : "";
     var pw    = pwEl    ? pwEl.value          : "";
     var name  = nameEl  ? nameEl.value.trim() : "";
+    var birthdate = birthdateEl ? birthdateEl.value : "";
     if (!email || !pw) { showToast("Preencha email e senha."); return; }
 
     if (authMode === "register") {
       var pwCheck = strongPasswordCheck(pw);
       if (!pwCheck.ok) { showToast(pwCheck.msg); return; }
+
+      // Idade mínima de 16 anos — checagem no cliente (a validação real
+      // e definitiva fica nas Firestore Rules, no momento de criar o
+      // documento de perfil).
+      if (!birthdate) { showToast("Informe sua data de nascimento."); return; }
+      var idadeCalc = calcularIdadeMIMI(birthdate);
+      if (idadeCalc === null) { showToast("Data de nascimento inválida."); return; }
+      if (idadeCalc < 16) { showToast("Você precisa ter pelo menos 16 anos para usar o MIMI."); return; }
     }
 
     // Trava de tentativas por e-mail: antes só valia pro login. Agora
@@ -16578,7 +16593,7 @@ function bindAuthPage() {
 
       var p = authMode === "login"
         ? FB.login(email, pw)
-        : FB.register(email, pw, name);
+        : FB.register(email, pw, name, birthdate);
 
       var timeout = setTimeout(function() {
         resetSubmitUi();
@@ -16678,6 +16693,23 @@ function passwordStrength(pw) {
   if (/[A-Z]/.test(pw) && /[a-z]/.test(pw)) score++;
   if (/[0-9]/.test(pw) && /[^A-Za-z0-9]/.test(pw)) score++;
   return Math.min(score, 4);
+}
+
+// ── Idade mínima de 16 anos para uso do MIMI ──────────────────────
+// Calcula a idade a partir de uma data "YYYY-MM-DD" (valor de <input
+// type="date">). Retorna null se a data for inválida ou estiver no futuro.
+function calcularIdadeMIMI(dataStr) {
+  if (!dataStr) return null;
+  var partes = dataStr.split("-");
+  if (partes.length !== 3) return null;
+  var nasc = new Date(Number(partes[0]), Number(partes[1]) - 1, Number(partes[2]));
+  if (isNaN(nasc.getTime())) return null;
+  var hoje = new Date();
+  if (nasc > hoje) return null;
+  var idade = hoje.getFullYear() - nasc.getFullYear();
+  var m = hoje.getMonth() - nasc.getMonth();
+  if (m < 0 || (m === 0 && hoje.getDate() < nasc.getDate())) idade--;
+  return idade;
 }
 
 // ── Regra mínima de senha forte, aplicada em cadastro e redefinição ──
