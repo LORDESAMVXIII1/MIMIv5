@@ -9754,7 +9754,7 @@ function bindPostCardEvents() {
       if (postFireLimitReached(post)) {
         state.paywallDialog = {
           icon: "spark",
-          title: "Você já usou seus 🔥 de hoje",
+          title: "Você já usou seus %%FIRE%% de hoje",
           text: "No plano gratuito, dá pra reagir com fogo até "+FIRE_DAILY_LIMIT+" vezes por dia em cada publicação. Assine o MIMI Plus pra reagir sem limite.",
           confirmLabel: "Assinar MIMI Plus",
           onConfirm: function() { state.subsOpen = true; }
@@ -10486,9 +10486,9 @@ function renderPaywallDialog() {
       '<div class="paywall-spark tw" style="bottom:58%;left:28%;width:2px;height:2px;animation-delay:1.2s;"></div>' +
       '<div class="paywall-spark tw" style="top:18%;right:30%;width:2.5px;height:2.5px;animation-delay:1.8s;"></div>' +
       '<div class="paywall-ring"><div class="paywall-ring-inner">'+mimiPlusIcon(icon,32)+'</div></div>' +
-      '<p class="paywall-title">'+esc(d.title)+'</p>' +
+      '<p class="paywall-title">'+esc(d.title).replace("%%FIRE%%", '<span style="display:inline-flex;vertical-align:middle;transform:translateY(-2px);">'+fireSvg(18,null,true)+'</span>')+'</p>' +
       '<p class="paywall-text">'+esc(d.text)+'</p>' +
-      '<button class="paywall-btn" data-paywall-ok>'+mimiPlusIcon("crown",16)+'<span>'+esc(d.confirmLabel||"Assinar MIMI Plus")+'</span></button>' +
+      '<button class="paywall-btn" data-paywall-ok>'+mimiPlusIcon("crown",22)+'<span>'+esc(d.confirmLabel||"Assinar MIMI Plus")+'</span></button>' +
       '<button class="paywall-later" data-paywall-cancel>Agora não</button>' +
     '</div>' +
   '</div>';
