@@ -313,6 +313,8 @@
   .act-btn { background:none; border:none; cursor:pointer; display:flex; align-items:center; gap:5px; padding:8px 10px; font-size:13px; font-weight:600; border-radius:10px; color:var(--sub); }
   .act-btn.fire-pop svg { animation:firePop .22s ease; }
   @keyframes firePop { 0%{transform:scale(1);} 45%{transform:scale(1.35);} 100%{transform:scale(1);} }
+  .act-btn.like-pop svg { animation:likePop .28s ease; }
+  @keyframes likePop { 0%{transform:scale(1);} 35%{transform:scale(1.35);} 100%{transform:scale(1);} }
   .act-btn.liked { color:var(--pink); }
   .act-btn.saved { color:var(--accent); }
   .comments-box { padding:8px 14px 14px; border-top:1px solid var(--border); }
@@ -1784,20 +1786,17 @@ function fireSvg(size, color, filled) {
     '</svg>';
 }
 function cuteFaceSvg(size, color, filled) {
-  size = size || 20; color = color || "var(--sub)";
-  if (filled) {
-    return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 24 24">' +
-      '<circle cx="12" cy="12" r="10" fill="'+color+'"/>' +
-      '<circle cx="8.7" cy="10.2" r="1.3" fill="#fff"/>' +
-      '<circle cx="15.3" cy="10.2" r="1.3" fill="#fff"/>' +
-      '<path d="M7.7 14.3c1 1.4 2.8 2 4.3 2s3.3-.6 4.3-2" stroke="#fff" stroke-width="1.8" stroke-linecap="round" fill="none"/>' +
-      '</svg>';
-  }
-  return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 24 24" fill="none" stroke="'+color+'" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
-    '<circle cx="12" cy="12" r="9.3"/>' +
-    '<circle cx="8.7" cy="10.2" r="1" fill="'+color+'" stroke="none"/>' +
-    '<circle cx="15.3" cy="10.2" r="1" fill="'+color+'" stroke="none"/>' +
-    '<path d="M7.7 14.3c1 1.4 2.8 2 4.3 2s3.3-.6 4.3-2"/>' +
+  // Coração com gradiente rosa (substitui a antiga carinha feliz) — variante
+  // escolhida no protótipo MIMI-coracoes-PROTOTIPO.html ("Gradiente rosa,
+  // mesmo espírito visual do 🔥").
+  size = size || 20;
+  var gid = 'lhg'+Math.random().toString(36).slice(2,8);
+  var path = 'M12 20.5c-.3 0-.6-.1-.8-.3C7.4 17 3 13 3 8.9 3 6.2 5.1 4 7.7 4c1.6 0 3.1.8 4 2 .1.1.3.1.4 0 .9-1.2 2.4-2 4-2C18.9 4 21 6.2 21 8.9c0 4.1-4.4 8.1-8.2 11.3-.2.2-.5.3-.8.3z';
+  return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 24 24" style="filter:'+(filled?'drop-shadow(0 0 7px rgba(255,77,141,.7))':'none')+';opacity:'+(filled?1:.6)+'">'+
+    '<defs><linearGradient id="'+gid+'" x1="0" y1="1" x2="1" y2="0">'+
+      '<stop offset="0%" stop-color="#ff4d8d"/><stop offset="100%" stop-color="#ffa6c9"/>'+
+    '</linearGradient></defs>'+
+    '<path d="'+path+'" fill="'+(filled?'url(#'+gid+')':'none')+'" stroke="url(#'+gid+')" stroke-width="1.8" stroke-linejoin="round"/>'+
     '</svg>';
 }
 
@@ -9810,6 +9809,13 @@ function bindPostCardEvents() {
       }
       FB.likePost(pid, idx === -1);
       syncReactionButtons(post);
+      if (idx === -1) { // curtiu agora (não estava curtido antes)
+        var likeBtnEl = appEl.querySelector('[data-like="'+pid+'"]');
+        if (likeBtnEl) {
+          likeBtnEl.classList.add("like-pop");
+          setTimeout(function(){ likeBtnEl.classList.remove("like-pop"); }, 280);
+        }
+      }
     });
   });
   appEl.querySelectorAll("[data-fire]").forEach(function(btn) {
