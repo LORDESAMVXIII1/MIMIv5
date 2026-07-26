@@ -1775,14 +1775,12 @@ function fireSvg(size, color, filled) {
   size = size || 20;
   _fireGradId++;
   var gid = "fireGrad" + _fireGradId;
-  return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 24 24" style="opacity:'+(filled?1:.5)+';filter:'+(filled?'drop-shadow(0 0 4px rgba(255,60,20,.55))':'none')+'">' +
-    '<defs><linearGradient id="'+gid+'" x1="0" y1="0" x2="0.15" y2="1">' +
-      '<stop offset="0%" stop-color="#ffe14d"/>' +
-      '<stop offset="35%" stop-color="#ff9500"/>' +
-      '<stop offset="68%" stop-color="#ff3d1c"/>' +
-      '<stop offset="100%" stop-color="#d6116a"/>' +
+  return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 24 24" style="opacity:'+(filled?1:.55)+';filter:'+(filled?'drop-shadow(0 0 9px rgba(255,60,0,.85))':'none')+'">' +
+    '<defs><linearGradient id="'+gid+'" x1="0" y1="1" x2="1" y2="0">' +
+      '<stop offset="0%" stop-color="#ff0000"/>' +
+      '<stop offset="100%" stop-color="#ff8800"/>' +
     '</linearGradient></defs>' +
-    '<path d="'+FIRE_PATH+'" fill="url(#'+gid+')"/>' +
+    '<path d="'+FIRE_PATH+'" fill="none" stroke="url(#'+gid+')" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>' +
     '</svg>';
 }
 function cuteFaceSvg(size, color, filled) {
