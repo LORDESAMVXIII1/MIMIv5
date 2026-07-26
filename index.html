@@ -3389,6 +3389,7 @@ var _rtdbReady = false;
 function _teardownRealtimeSession() {
   detachRealtimeMessages();
   detachRealtimeConvoList();
+  stopMessageCleanupSchedule();
   _rtdbReady = false;
   try {
     if (typeof firebase !== "undefined" && firebase.auth && firebase.auth().currentUser) {
@@ -6675,6 +6676,89 @@ function stopStoryPolling() {
   if (_storyPollInterval) { clearInterval(_storyPollInterval); _storyPollInterval = null; }
 }
 
+// ── LIMPEZA AUTOMÁTICA DE MENSAGENS (retenção de 3 dias) ──────────
+// Pedido do usuário: nenhuma mensagem — texto, foto, vídeo, áudio,
+// figurinha, carta, convite de jogo, etc. — deve continuar existindo
+// depois de 3 dias, nem no app nem no banco. Motivo principal: o plano
+// gratuito do Supabase tem só 500 MB de banco e NÃO libera espaço
+// sozinho quando enche (diferente da cota do Firebase, que reseta por
+// dia); então evitar acumular mensagens (principalmente mídia em
+// base64) evita esbarrar nesse teto.
+// ⚠️ Importante: isso roda no próprio app (não existe servidor/cron
+// nesta arquitetura), então só limpa de verdade enquanto ALGUÉM está
+// com o app aberto — cada vez que alguém entra, ele limpa TODAS as
+// conversas em que essa pessoa está (o que cobre as duas pontas de
+// qualquer conversa em que ao menos um dos dois usa o app de vez em
+// quando).
+var MSG_RETENTION_MS = 3 * 24 * 60 * 60 * 1000; // 3 dias
+
+// Apaga de verdade uma mensagem (diferente de "apagar para todos", que
+// só marca deleted:true e mantém o documento) — remove o doc principal
+// e, se o conteúdo tiver sido dividido em pedaços por ser grande demais
+// (foto/vídeo/áudio via msgChunks), remove cada pedaço também.
+function _hardDeleteMessage(convoId, msg) {
+  var msgId = msg._id || msg.id;
+  var chunkCleanup = msg.chunked
+    ? fsQuery("msgChunks", "msgId", "EQUAL", msgId).then(function(chunks) {
+        return Promise.all((chunks || []).map(function(c) {
+          return fsDelete("msgChunks/" + c._id).catch(function(){});
+        }));
+      }).catch(function(){})
+    : Promise.resolve();
+  return chunkCleanup.then(function() {
+    return fsDelete("convos/" + convoId + "/messages/" + msgId).catch(function(err) {
+      console.warn("⚠️ Não foi possível apagar mensagem expirada '"+msgId+"':", err && err.message || err);
+    });
+  });
+}
+
+// Busca (sempre fresco do servidor, não só o que já está carregado em
+// tela) as mensagens de UMA conversa e apaga as que passaram dos 3 dias.
+function _cleanupConvoMessages(convoId) {
+  return fsList("convos/" + convoId + "/messages").then(function(msgs) {
+    var cutoff = Date.now() - MSG_RETENTION_MS;
+    var expired = (msgs || []).filter(function(m) {
+      return m.createdAt && new Date(m.createdAt).getTime() < cutoff;
+    });
+    if (!expired.length) return;
+    return Promise.all(expired.map(function(m) { return _hardDeleteMessage(convoId, m); }))
+      .then(function() {
+        // Reflete a limpeza no histórico já carregado localmente (se essa
+        // conversa já tiver sido aberta nesta sessão) e, se for a conversa
+        // aberta na tela agora, atualiza a tela pra tirar os balões.
+        var expiredIds = {};
+        expired.forEach(function(m) { expiredIds[m._id] = true; });
+        var chat = chatHistories[convoId];
+        if (chat) {
+          chatHistories[convoId] = chat.filter(function(m) { return !expiredIds[m.id]; });
+          if (state.page === "msgs" && state.activeConvoId === convoId) backgroundRender();
+        }
+      });
+  }).catch(function(err) {
+    console.warn("⚠️ Falha ao limpar mensagens expiradas da conversa '"+convoId+"':", err && err.message || err);
+  });
+}
+
+// Passa por todas as conversas do usuário logado. CONVOS já só lista as
+// conversas em que ele é membro, então isso nunca mexe em conversa
+// alheia.
+function runMessageCleanup() {
+  if (!_idToken || !ME_ID) return;
+  CONVOS.forEach(function(c) { _cleanupConvoMessages(c.id); });
+}
+var _msgCleanupInterval = null;
+function startMessageCleanupSchedule() {
+  stopMessageCleanupSchedule();
+  // Repete de tempos em tempos enquanto o app estiver aberto. 1x por
+  // hora é de sobra pra uma janela de retenção de 3 dias — a primeira
+  // limpeza de verdade acontece já no boot, logo depois que as
+  // conversas terminam de carregar (ver onAuthSuccess/restoreSession).
+  _msgCleanupInterval = setInterval(runMessageCleanup, 60 * 60 * 1000);
+}
+function stopMessageCleanupSchedule() {
+  if (_msgCleanupInterval) { clearInterval(_msgCleanupInterval); _msgCleanupInterval = null; }
+}
+
 function _relTime(iso) {
   try {
     var diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
@@ -7101,15 +7185,27 @@ function startChatPolling() {
     try {
       _updateRtIndicator(); // reafirma o ícone ⚡/🔄 mesmo depois de um render que recriou o cabeçalho
       checkOnlineStatus(CONVOS);
-      // Se o tempo real está ativo e cobrindo ESSA conversa, pula a busca
-      // de mensagens por REST neste tick — o onSnapshot já mantém isso
-      // sincronizado instantaneamente. Se o tempo real cair no meio do
-      // caminho (rede, listener com erro etc.), _rtActiveConvoId volta a
-      // ficar vazio automaticamente e o polling REST retoma sozinho no
-      // próximo tick, sem precisar recarregar a página.
-      if (_rtActiveConvoId !== state.activeConvoId) {
-        loadChatMessagesNow();
-      }
+      // 🩹 FIX (mensagem só aparece ao sair/reentrar na conversa): antes,
+      // quando o tempo real (onSnapshot) estava "ativo" pra essa conversa,
+      // a busca REST era pulada neste tick — a lógica assumia que, se o
+      // Firebase falhasse, o próprio onSnapshot ia disparar o callback de
+      // erro e desligar o tempo real sozinho. Só que isso NÃO cobre o caso
+      // real que estava acontecendo: a réplica da mensagem pro Firebase
+      // (_mirrorSetToFirebase, disparada por fsSet) é "fire-and-forget" —
+      // se ela falhar (cota do Firebase estourada, rede, etc.), a mensagem
+      // simplesmente nunca chega a existir no Firebase, então o onSnapshot
+      // não recebe NADA e também não dispara erro nenhum (silêncio total).
+      // Como o Supabase (a base principal, onde a escrita sempre teve
+      // sucesso) só era consultado de novo quando o usuário saía e voltava
+      // pra conversa (o que faz uma busca REST imediata), a mensagem ficava
+      // "presa", invisível, até isso acontecer.
+      // Agora a busca REST roda em TODO tick, tenha ou não tempo real
+      // ativo — ela é incremental (só busca o que mudou desde o último
+      // checkpoint) e consulta o Supabase, não o Firebase, então não
+      // aumenta o risco de estourar cota. O tempo real continua em uso
+      // (deixa a entrega ainda mais instantânea quando funciona), mas deixa
+      // de ser um ponto único de falha.
+      loadChatMessagesNow();
       checkReadStatus(state.activeConvoId);
       // Enquanto a conversa está aberta e visível, continua a marcar como
       // vista (cobre o caso de a outra pessoa mandar mensagens novas
@@ -16334,7 +16430,11 @@ function onAuthSuccess(u) {
   retryPromise(function(){ return FB.loadStories(); }, 1, 1500).then(function(){ backgroundRender(); }).catch(function(){});
 
   // ── Conversas ────────────────────────────────────────
-  retryPromise(function(){ return FB.loadConvos(); }, 1, 1500).then(function(){ backgroundRender(); checkOnlineStatus(CONVOS); }).catch(function(){});
+  retryPromise(function(){ return FB.loadConvos(); }, 1, 1500).then(function(){
+    backgroundRender(); checkOnlineStatus(CONVOS);
+    runMessageCleanup(); // 1ª limpeza de mensagens com +3 dias, já com as conversas carregadas
+  }).catch(function(){});
+  startMessageCleanupSchedule(); // repete a cada 1h enquanto o app estiver aberto
 
   // ── Presença ─────────────────────────────────────────
   startPresence();
@@ -17402,7 +17502,11 @@ function checkAgeVerificationLinkFromUrl() {
         }).catch(function(){});
 
         // ── 2. Conversas ─────────────────────────────────────
-        retryPromise(function(){ return FB.loadConvos(); }, 1, 1500).then(function(){ render(); checkOnlineStatus(CONVOS); }).catch(function(){});
+        retryPromise(function(){ return FB.loadConvos(); }, 1, 1500).then(function(){
+          render(); checkOnlineStatus(CONVOS);
+          runMessageCleanup(); // 1ª limpeza de mensagens com +3 dias, já com as conversas carregadas
+        }).catch(function(){});
+        startMessageCleanupSchedule(); // repete a cada 1h enquanto o app estiver aberto
 
         // ── 3. Presença online ────────────────────────────────
         startPresence();
