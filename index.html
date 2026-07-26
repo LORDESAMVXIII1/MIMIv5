@@ -311,6 +311,8 @@
   .post-loc { display:flex; align-items:center; gap:5px; padding:0 14px 10px; font-size:12.5px; color:var(--accent); font-weight:600; }
   .post-actions { display:flex; align-items:center; padding:6px 8px 2px; }
   .act-btn { background:none; border:none; cursor:pointer; display:flex; align-items:center; gap:5px; padding:8px 10px; font-size:13px; font-weight:600; border-radius:10px; color:var(--sub); }
+  .act-btn.fire-pop svg { animation:firePop .22s ease; }
+  @keyframes firePop { 0%{transform:scale(1);} 45%{transform:scale(1.35);} 100%{transform:scale(1);} }
   .act-btn.liked { color:var(--pink); }
   .act-btn.saved { color:var(--accent); }
   .comments-box { padding:8px 14px 14px; border-top:1px solid var(--border); }
@@ -1764,19 +1766,23 @@ function konvoMenuIcon(type) {
 }
 
 // Carinha bravinha fofa usada como alternativa para "não gostei"
-function cuteAngrySvg(size, color, filled) {
-  size = size || 20; color = color || "var(--sub)";
-  if (filled) {
-    return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 24 24">' +
-      '<circle cx="12" cy="12" r="10" fill="'+color+'"/>' +
-      '<path d="M7 9.3l3 1.1M17 9.3l-3 1.1" stroke="#fff" stroke-width="1.8" stroke-linecap="round" fill="none"/>' +
-      '<path d="M8.2 15.8c1-1.1 2.5-1.6 3.8-1.6s2.8.5 3.8 1.6" stroke="#fff" stroke-width="1.8" stroke-linecap="round" fill="none"/>' +
-      '</svg>';
-  }
-  return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 24 24" fill="none" stroke="'+color+'" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
-    '<circle cx="12" cy="12" r="9.3"/>' +
-    '<path d="M7 9.3l3 1.1M17 9.3l-3 1.1"/>' +
-    '<path d="M8.2 15.8c1-1.1 2.5-1.6 3.8-1.6s2.8.5 3.8 1.6"/>' +
+// Ícone de 🔥 — reação usada pra "chamar atenção" de quem publicou.
+// Preenchido usa um degradê laranja→vermelho (mesmo espírito visual do
+// selo MIMI Plus); vazio segue o padrão outline dos outros ícones de ação.
+var _fireGradId = 0;
+var FIRE_PATH = "M8.5 14.5A2.5 2.5 0 0011 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 11-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 002.5 2.5z";
+function fireSvg(size, color, filled) {
+  size = size || 20;
+  _fireGradId++;
+  var gid = "fireGrad" + _fireGradId;
+  return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 24 24" style="opacity:'+(filled?1:.5)+';filter:'+(filled?'drop-shadow(0 0 4px rgba(255,60,20,.55))':'none')+'">' +
+    '<defs><linearGradient id="'+gid+'" x1="0" y1="0" x2="0.15" y2="1">' +
+      '<stop offset="0%" stop-color="#ffe14d"/>' +
+      '<stop offset="35%" stop-color="#ff9500"/>' +
+      '<stop offset="68%" stop-color="#ff3d1c"/>' +
+      '<stop offset="100%" stop-color="#d6116a"/>' +
+    '</linearGradient></defs>' +
+    '<path d="'+FIRE_PATH+'" fill="url(#'+gid+')"/>' +
     '</svg>';
 }
 function cuteFaceSvg(size, color, filled) {
@@ -2680,23 +2686,38 @@ var posts = [
   { id:"p1", authorId:"u999",
     text:"🎀 Nova versão do app no ar! Amizades online nunca foram tão divertidas. Quem quer testar? #Mimi #App",
     img:"https://images.unsplash.com/photo-1611162616305-c69b3fa7fbe0?w=700&q=80", video:null, loc:null,
-    likedBy:[], dislikedBy:[], saved:false, time:"2m" },
+    likedBy:[], fireTotal:0, fireDaily:{}, saved:false, time:"2m" },
   { id:"p2", authorId:"u998",
     text:"O pôr do sol de hoje estava incrível 🌅 Aproveitem cada momento!",
     img:"https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=700&q=80", video:null, loc:null,
-    likedBy:["u999"], dislikedBy:[], saved:false, time:"15m" },
+    likedBy:["u999"], fireTotal:2, fireDaily:{}, saved:false, time:"15m" },
   { id:"p3", authorId:"u997",
     text:"React + Firebase = combinação perfeita! 🔥 Quem usa essa stack? #ReactJS #Firebase #Dev",
-    img:null, video:null, loc:null, likedBy:[], dislikedBy:[], saved:true, time:"1h" },
+    img:null, video:null, loc:null, likedBy:[], fireTotal:5, fireDaily:{}, saved:true, time:"1h" },
   { id:"p4", authorId:"u996",
     text:"☕ Café da manhã + playlist boa + código. Vida boa! Alguém mais no modo produtividade?",
     img:"https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?w=700&q=80", video:null, loc:null,
-    likedBy:[], dislikedBy:[], saved:false, time:"3h" },
+    likedBy:[], fireTotal:0, fireDaily:{}, saved:false, time:"3h" },
 ];
 function postLikeCount(p) { return p.likedBy.length; }
 function postIsLiked(p) { return p.likedBy.indexOf(ME_ID) !== -1; }
-function postDislikeCount(p) { return (p.dislikedBy||[]).length; }
-function postIsDisliked(p) { return (p.dislikedBy||[]).indexOf(ME_ID) !== -1; }
+function postFireCount(p) { return p.fireTotal || 0; }
+// Reação de 🔥: cada usuário pode tocar até FIRE_DAILY_LIMIT vezes por
+// publicação, por dia. Depois disso, precisa assinar o MIMI Plus pra
+// continuar reagindo naquela publicação no mesmo dia.
+var FIRE_DAILY_LIMIT = 5;
+function _todayKey() { var d = new Date(); return d.getFullYear()+"-"+(d.getMonth()+1)+"-"+d.getDate(); }
+function getMyFireToday(p) {
+  p.fireDaily = p.fireDaily || {};
+  var entry = p.fireDaily[ME_ID];
+  var today = _todayKey();
+  if (!entry || entry.date !== today) { entry = { date: today, count: 0 }; p.fireDaily[ME_ID] = entry; }
+  return entry;
+}
+function postMyFireCount(p) { return getMyFireToday(p).count; }
+function postFireLimitReached(p) {
+  return !isSubscriptionActive(state.user) && postMyFireCount(p) >= FIRE_DAILY_LIMIT;
+}
 function postShareCount(p) { return p._shares || 0; }
 
 var postComments = {};
@@ -5081,7 +5102,7 @@ var FB = {
       audioMeta: postData.audioMeta || null,
       loc:       postData.loc   || null,
       likedBy:   [],
-      dislikedBy: [],
+      fireTotal: 0,
       createdAt: now,
       time:      now,
     };
@@ -5108,7 +5129,8 @@ var FB = {
         d._fromFs = true;
         d.saved = false;
         d.likedBy = d.likedBy || [];
-        d.dislikedBy = d.dislikedBy || [];
+        d.fireTotal = d.fireTotal || 0;
+        d.fireDaily = d.fireDaily || {};
         // Usa createdAt para tempo relativo; time era o campo ISO antigo
         var isoTime = d.createdAt || d.time || "";
         d.time = (isoTime && isoTime.length > 10) ? _relTime(isoTime) : (isoTime || "antes");
@@ -5147,26 +5169,17 @@ var FB = {
       var idx = likedBy.indexOf(ME_ID);
       if (liked && idx === -1) likedBy.push(ME_ID);
       if (!liked && idx !== -1) likedBy.splice(idx,1);
-      var dislikedBy = doc.dislikedBy || [];
-      var didx = dislikedBy.indexOf(ME_ID);
-      if (liked && didx !== -1) dislikedBy.splice(didx,1); // curtir remove o "não gostei"
-      fsSet("posts/"+pid, { likedBy: likedBy, dislikedBy: dislikedBy }).catch(function(){});
+      fsSet("posts/"+pid, { likedBy: likedBy }).catch(function(){});
     }).catch(function(){});
   },
 
-  dislikePost: function(pid, disliked) {
+  // Sincroniza a reação de 🔥: o limite diário (5x/dia por publicação no
+  // plano gratuito) é controlado no cliente antes de chamar isso; aqui só
+  // gravamos o novo total. fireTotal é um contador simples (soma de todos
+  // os toques de todo mundo), não uma lista de usuários.
+  firePost: function(pid, newTotal) {
     if (!_idToken) return;
-    fsGet("posts/"+pid).then(function(doc){
-      if (!doc) return;
-      var dislikedBy = doc.dislikedBy || [];
-      var idx = dislikedBy.indexOf(ME_ID);
-      if (disliked && idx === -1) dislikedBy.push(ME_ID);
-      if (!disliked && idx !== -1) dislikedBy.splice(idx,1);
-      var likedBy = doc.likedBy || [];
-      var lidx = likedBy.indexOf(ME_ID);
-      if (disliked && lidx !== -1) likedBy.splice(lidx,1); // "não gostei" remove a curtida
-      fsSet("posts/"+pid, { likedBy: likedBy, dislikedBy: dislikedBy }).catch(function(){});
-    }).catch(function(){});
+    fsSet("posts/"+pid, { fireTotal: newTotal }).catch(function(){});
   },
 
   // ── STORIES ───────────────────────────────────────────────
@@ -9491,7 +9504,7 @@ function renderPostCard(post, opts) {
 
   var locHtml = post.loc ? '<div class="post-loc">'+sparkleIcon("loc",18)+' '+esc(post.loc)+'</div>' : "";
   var liked = postIsLiked(post);
-  var disliked = postIsDisliked(post);
+  var fired = postMyFireCount(post) > 0;
   var commentCount = getComments(post.id).length;
 
   return '<div class="post-card" data-post-id="'+post.id+'">' +
@@ -9515,7 +9528,7 @@ function renderPostCard(post, opts) {
     mediaHtml +
     '<div class="post-actions">' +
       '<button class="act-btn '+(liked?"liked":"")+'" data-like="'+post.id+'">'+cuteFaceSvg(24,liked?C.pink:"var(--sub)",liked)+' <span data-like-count="'+post.id+'">'+fmtNum(postLikeCount(post))+'</span></button>' +
-      '<button class="act-btn '+(disliked?"disliked":"")+'" data-dislike="'+post.id+'">'+cuteAngrySvg(24,disliked?"#5b5b6b":"var(--sub)",disliked)+' <span data-dislike-count="'+post.id+'">'+fmtNum(postDislikeCount(post))+'</span></button>' +
+      '<button class="act-btn '+(fired?"fired":"")+'" data-fire="'+post.id+'">'+fireSvg(24,"var(--sub)",fired)+' <span data-fire-count="'+post.id+'">'+fmtNum(postFireCount(post))+'</span></button>' +
       '<button class="act-btn" data-toggle-comments="'+post.id+'">'+sparkleIcon("comment",30,"var(--sub)")+' '+fmtNum(commentCount)+'</button>' +
       '<button class="act-btn" data-share-post="'+post.id+'">'+sparkleIcon("share",30,"var(--sub)")+' '+fmtNum(postShareCount(post))+'</button>' +
       ((post.img || post.video || post.audio) ?
@@ -9685,16 +9698,16 @@ function bindPostCardEvents() {
   // vídeo reiniciar toda vez que alguém curtia.
   function syncReactionButtons(post) {
     var likeBtn = appEl.querySelector('[data-like="'+post.id+'"]');
-    var dislikeBtn = appEl.querySelector('[data-dislike="'+post.id+'"]');
+    var fireBtn = appEl.querySelector('[data-fire="'+post.id+'"]');
     var liked = post.likedBy.indexOf(ME_ID) !== -1;
-    var disliked = (post.dislikedBy || []).indexOf(ME_ID) !== -1;
+    var fired = postMyFireCount(post) > 0;
     if (likeBtn) {
       likeBtn.classList.toggle("liked", liked);
       likeBtn.innerHTML = cuteFaceSvg(24, liked?C.pink:"var(--sub)", liked) + ' <span data-like-count="'+post.id+'">'+fmtNum(postLikeCount(post))+'</span>';
     }
-    if (dislikeBtn) {
-      dislikeBtn.classList.toggle("disliked", disliked);
-      dislikeBtn.innerHTML = cuteAngrySvg(24, disliked?"#5b5b6b":"var(--sub)", disliked) + ' <span data-dislike-count="'+post.id+'">'+fmtNum(postDislikeCount(post))+'</span>';
+    if (fireBtn) {
+      fireBtn.classList.toggle("fired", fired);
+      fireBtn.innerHTML = fireSvg(24, "var(--sub)", fired) + ' <span data-fire-count="'+post.id+'">'+fmtNum(postFireCount(post))+'</span>';
     }
   }
 
@@ -9703,12 +9716,9 @@ function bindPostCardEvents() {
       var pid = btn.getAttribute("data-like");
       var post = posts.find(function(p){ return p.id === pid; });
       if (!post) return;
-      post.dislikedBy = post.dislikedBy || [];
       var idx = post.likedBy.indexOf(ME_ID);
       if (idx === -1) {
         post.likedBy.push(ME_ID);
-        var dIdx = post.dislikedBy.indexOf(ME_ID);
-        if (dIdx !== -1) post.dislikedBy.splice(dIdx,1); // curtir remove o "não gostei"
         // Notifica o dono do post que alguém curtiu
         if (post.authorId !== ME_ID) {
           addNotif("like", ME_ID, "curtiu sua publicação");
@@ -9738,22 +9748,29 @@ function bindPostCardEvents() {
       syncReactionButtons(post);
     });
   });
-  appEl.querySelectorAll("[data-dislike]").forEach(function(btn) {
+  appEl.querySelectorAll("[data-fire]").forEach(function(btn) {
     btn.addEventListener("click", function() {
-      var pid = btn.getAttribute("data-dislike");
+      var pid = btn.getAttribute("data-fire");
       var post = posts.find(function(p){ return p.id === pid; });
       if (!post) return;
-      post.dislikedBy = post.dislikedBy || [];
-      var idx = post.dislikedBy.indexOf(ME_ID);
-      if (idx === -1) {
-        post.dislikedBy.push(ME_ID);
-        var lIdx = post.likedBy.indexOf(ME_ID);
-        if (lIdx !== -1) post.likedBy.splice(lIdx,1); // "não gostei" remove a curtida
-      } else {
-        post.dislikedBy.splice(idx,1);
+      if (postFireLimitReached(post)) {
+        state.paywallDialog = {
+          icon: "spark",
+          title: "Você já usou seus 🔥 de hoje",
+          text: "No plano gratuito, dá pra reagir com fogo até "+FIRE_DAILY_LIMIT+" vezes por dia em cada publicação. Assine o MIMI Plus pra reagir sem limite.",
+          confirmLabel: "Assinar MIMI Plus",
+          onConfirm: function() { state.subsOpen = true; }
+        };
+        render();
+        return;
       }
-      FB.dislikePost(pid, idx === -1);
+      var entry = getMyFireToday(post);
+      entry.count++;
+      post.fireTotal = (post.fireTotal || 0) + 1;
+      FB.firePost(pid, post.fireTotal);
       syncReactionButtons(post);
+      btn.classList.add("fire-pop");
+      setTimeout(function(){ btn.classList.remove("fire-pop"); }, 220);
     });
   });
   appEl.querySelectorAll("[data-save]").forEach(function(btn) {
