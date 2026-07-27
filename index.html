@@ -6166,6 +6166,15 @@ function backgroundRender() {
   // atualizados nas listas locais mesmo sem renderizar agora; a tela só é
   // atualizada de fato quando a pessoa sair de Vibes.
   if (state.page === "vibes") { _pendingBackgroundRender = true; return; }
+  // FIX: mesmo motivo do Vibes acima — reconstruir a tela inteira do Feed
+  // por causa de um poll de fundo (stories, notificações, reações, lista de
+  // conversas) destruía e recriava TODOS os vídeos, mesmo o que a pessoa
+  // estava assistindo naquele instante com som ligado. Isso cortava a
+  // reprodução a cada 15-20s sem nenhuma ação da pessoa, e ainda contribuía
+  // pro som "pulando" entre vídeos errados ao reiniciar a eleição do zero.
+  // Os dados continuam atualizados nas listas locais; a tela só é
+  // reconstruída de fato quando a pessoa sair do Feed.
+  if (state.page === "feed" && !state.postDetailId) { _pendingBackgroundRender = true; return; }
   // FIX: o modal da carta de amor é anexado fora da árvore controlada pelo
   // render() (appEl.appendChild direto). Um render de fundo no meio da
   // leitura reconstruía appEl.innerHTML inteiro e apagava o modal sem
@@ -8313,6 +8322,12 @@ function bindGlobalHandlers() {
       // continuam abertos e na mesma posição depois de ir no Perfil e
       // voltar pro Feed, em vez de sempre pular pro topo).
       state.tabScrollY[state.page] = window.scrollY;
+      // FIX: vídeo/música do Feed continuavam tocando "escondidos" depois
+      // de trocar de aba (Vibes, Explorar, Mensagens, Perfil...), porque
+      // dependia só da reconstrução da tela remover os elementos — o que
+      // nem sempre acontecia na hora certa. Agora paramos tudo na marra,
+      // no instante exato da troca, antes mesmo do render() rodar.
+      if (state.page === "feed" && target !== "feed") pauseAllFeedMedia();
       state.page = target;
       _pendingBackgroundRender = false;
       if (state.page === "profile") state.profileSubView = "profile";
@@ -9059,6 +9074,117 @@ function applyFeedSoundToAllVideos(soundOn) {
   });
 }
 
+// ─── COORDENADOR DE "VÍDEO ÚNICO ATIVO" DO FEED ──────────────────────────
+// FIX: antes, cada vídeo tinha seu PRÓPRIO IntersectionObserver e decidia
+// sozinho, com apenas 40% visível, se devia tocar com som (conforme a
+// preferência global). Rolando rápido, era comum DOIS vídeos ficarem acima
+// de 40% ao mesmo tempo (um saindo, outro entrando) — cada um tocava por
+// conta própria e só depois um tentava pausar o outro, causando som
+// sobreposto/errado (às vezes o vídeo de baixo, que a pessoa nem chegou a
+// ver direito, era o que "ganhava" e ficava tocando sozinho).
+//
+// Agora existe UM observer compartilhado, que sabe o quanto de CADA vídeo
+// está visível, e uma "eleição" central que garante que só um vídeo por vez
+// — o mais visível de verdade — toca com som. Todos os outros ficam
+// pausados e mudos. ENTER (65%) é o quanto precisa aparecer pra ser eleito;
+// EXIT (35%) é o quanto ainda precisa estar visível pra CONTINUAR sendo o
+// vídeo ativo (evita ligar/desligar toda hora numa rolagem pequena).
+var _feedVideoRatios = {};   // postId -> proporção visível (0 a 1)
+var _feedPlayersById = {};   // postId -> instância do AdvancedVideoPlayer
+var _feedActiveVideoId = null;
+var _feedSharedObserver = null;
+var FEED_VIDEO_ENTER_RATIO = 0.65;
+var FEED_VIDEO_EXIT_RATIO  = 0.35;
+
+function getFeedSharedObserver() {
+  if (_feedSharedObserver || !('IntersectionObserver' in window)) return _feedSharedObserver;
+  _feedSharedObserver = new IntersectionObserver(function(entries) {
+    entries.forEach(function(entry) {
+      var pid = entry.target.getAttribute('data-feed-video-postid');
+      if (!pid) return;
+      _feedVideoRatios[pid] = entry.isIntersecting ? entry.intersectionRatio : 0;
+    });
+    electActiveFeedVideo();
+  }, { threshold: [0, 0.15, 0.35, 0.5, 0.65, 0.8, 1] });
+  return _feedSharedObserver;
+}
+
+// Escolhe qual vídeo (se algum) merece tocar com som agora, e força todos
+// os demais a ficarem pausados e mudos — nunca mais de um tocando ao mesmo
+// tempo, e nunca um vídeo que a pessoa ainda nem alcançou de verdade.
+function electActiveFeedVideo() {
+  if (state.page !== "feed" || hasOpenOverlay()) {
+    pauseAllFeedVideos();
+    _feedActiveVideoId = null;
+    return;
+  }
+
+  var bestId = null, bestRatio = 0;
+  Object.keys(_feedVideoRatios).forEach(function(pid) {
+    var r = _feedVideoRatios[pid] || 0;
+    if (r > bestRatio) { bestRatio = r; bestId = pid; }
+  });
+
+  var currentRatio = _feedActiveVideoId ? (_feedVideoRatios[_feedActiveVideoId] || 0) : 0;
+  var winnerId;
+  if (_feedActiveVideoId && currentRatio >= FEED_VIDEO_EXIT_RATIO &&
+      (!bestId || bestId === _feedActiveVideoId || bestRatio < FEED_VIDEO_ENTER_RATIO)) {
+    // Mantém o vídeo atual: ainda está visível o bastante e nenhum outro
+    // "de verdade" (65%+) tomou o lugar dele.
+    winnerId = _feedActiveVideoId;
+  } else if (bestId && bestRatio >= FEED_VIDEO_ENTER_RATIO) {
+    winnerId = bestId;
+  } else {
+    // Ninguém alcançou o vídeo o suficiente ainda (ex.: no meio da rolagem
+    // entre dois vídeos) — melhor não tocar som de ninguém por um instante
+    // do que arriscar tocar o errado.
+    winnerId = null;
+  }
+
+  Object.keys(_feedPlayersById).forEach(function(pid) {
+    var p = _feedPlayersById[pid];
+    if (!p || !p.video) return;
+    if (pid === winnerId) {
+      p.video.muted = !getFeedSoundOn();
+      var iconEl = document.getElementById('muteIcon-'+pid);
+      if (iconEl) iconEl.innerHTML = sparkleIcon(p.video.muted ? "volumeOff" : "volumeOn", 26);
+      if (p.video.paused) {
+        var pr = p.video.play();
+        if (pr && pr.catch) pr.catch(function(){});
+      }
+    } else {
+      p.video.muted = true;
+      if (!p.video.paused) p.video.pause();
+    }
+  });
+
+  _feedActiveVideoId = winnerId;
+}
+
+// Pausa e silencia TODOS os vídeos do Feed e as músicas dos posts. Usado ao
+// sair da aba Feed (pra outra aba do app) ou quando o app vai pra segundo
+// plano — pra nenhum som/vídeo continuar "por baixo" sem a pessoa ver.
+function pauseAllFeedVideos() {
+  Object.keys(_feedPlayersById).forEach(function(pid) {
+    var p = _feedPlayersById[pid];
+    if (!p || !p.video) return;
+    p.video.muted = true;
+    if (!p.video.paused) p.video.pause();
+  });
+}
+function pauseAllFeedMedia() {
+  pauseAllFeedVideos();
+  _feedActiveVideoId = null;
+  appEl.querySelectorAll("audio[data-track-audio]").forEach(function(a) {
+    if (!a.paused) a.pause();
+  });
+}
+// Vídeo/música do Feed nunca deve tocar escondido: silencia tudo assim que
+// o app vai pra segundo plano (aba trocada, app minimizado, tela bloqueada).
+document.addEventListener("visibilitychange", function() {
+  if (document.hidden && state.page === "feed") pauseAllFeedMedia();
+});
+
 // ─── BIND ADVANCED VIDEO PLAYERS ────────────────────────────────
 class AdvancedVideoPlayer {
   constructor(containerId) {
@@ -9081,43 +9207,18 @@ class AdvancedVideoPlayer {
     this.setupAutoplayOnScroll();
   }
 
-  // Toca o vídeo sozinho quando ele aparece na tela ao rolar o feed, e
-  // pausa quando sai de vista — sem precisar tocar nele manualmente.
+  // Registra este vídeo no observer COMPARTILHADO do feed (ver
+  // "COORDENADOR DE VÍDEO ÚNICO ATIVO" acima) em vez de ter seu próprio
+  // IntersectionObserver isolado — assim a eleição de qual vídeo toca com
+  // som considera TODOS os vídeos visíveis ao mesmo tempo, não cada um
+  // decidindo por conta própria.
   setupAutoplayOnScroll() {
-    if (!('IntersectionObserver' in window)) return;
-    var self = this;
-    this._io = new IntersectionObserver(function(entries) {
-      entries.forEach(function(entry) {
-        // FIX: o feed continua "por baixo" quando a pessoa abre um
-        // sheet/modal por cima dele (menu de ações, comentários, story,
-        // criar post, editar perfil, MIMI Plus, etc). Como cada render()
-        // recria os elementos de vídeo do feed do zero, sem esta checagem
-        // o vídeo era considerado "visível" (mesmo tampado pelo overlay) e
-        // voltava a tocar sozinho — daí ele ficar tocando por baixo da
-        // outra tela, atrapalhando.
-        var overlayOpen = hasOpenOverlay();
-        if (entry.isIntersecting && !overlayOpen) {
-          // FIX: sempre autoplay MUDO no scroll do feed — não brigar com
-          // a música/vídeo que já esteja audível em outra publicação. A
-          // pessoa decide o que quer ouvir tocando no botão de som.
-          if (self.video.paused) {
-            self.video.muted = !getFeedSoundOn();
-            var iconEl = document.getElementById('muteIcon-'+self.postId);
-            if (iconEl) iconEl.innerHTML = sparkleIcon(self.video.muted ? "volumeOff" : "volumeOn", 26);
-            var playPromise = self.video.play();
-            if (playPromise && playPromise.catch) playPromise.catch(function(){});
-          }
-        } else if (!entry.isIntersecting) {
-          // Só pausa quando saiu COMPLETAMENTE da tela (evita pausa
-          // acidental por layout shift enquanto ainda está parcialmente
-          // visível na tela do usuário).
-          if (entry.intersectionRatio === 0) self.video.pause();
-        } else if (overlayOpen) {
-          self.video.pause();
-        }
-      });
-    }, { threshold: [0, 0.4] });
-    this._io.observe(this.container);
+    _feedPlayersById[this.postId] = this;
+    _feedVideoRatios[this.postId] = 0;
+    var observer = getFeedSharedObserver();
+    if (!observer) return;
+    this.container.setAttribute('data-feed-video-postid', this.postId);
+    observer.observe(this.container);
   }
 
   setupEventListeners() {
@@ -9157,6 +9258,10 @@ class AdvancedVideoPlayer {
         if (!a.muted) a.muted = true;
       });
     }
+    // Reforça na hora que só o vídeo eleito (o realmente visível) fica
+    // tocando com som — evita qualquer outro vídeo, mesmo fora de vista,
+    // herdar som por causa da preferência global ter acabado de mudar.
+    electActiveFeedVideo();
   }
 
   setupKeyboardShortcuts() {
@@ -9184,16 +9289,19 @@ class AdvancedVideoPlayer {
     document.addEventListener('keydown', this._keydownHandler);
   }
 
-  // Limpa o listener global de teclado e o IntersectionObserver desta
-  // instância. Necessário porque cada render() do feed recria os elementos
-  // de vídeo do zero (appEl.innerHTML), então sem isto cada render deixava
-  // um listener de 'keydown' no document e um IntersectionObserver "presos"
-  // (apontando pra elementos já removidos da tela), que nunca eram
-  // liberados — daí o app ir ficando mais lento e mais travado quanto mais
-  // se navegava/curtia/comentava.
+  // Limpa o listener global de teclado e desregistra este vídeo do
+  // observer compartilhado do feed. Necessário porque cada render() do
+  // feed recria os elementos de vídeo do zero (appEl.innerHTML), então sem
+  // isto cada render deixava um listener de 'keydown' no document e uma
+  // entrada "presa" no observer/mapas globais (apontando pra elementos já
+  // removidos da tela), que nunca eram liberados — daí o app ir ficando
+  // mais lento e mais travado quanto mais se navegava/curtia/comentava.
   destroy() {
     if (this._keydownHandler) document.removeEventListener('keydown', this._keydownHandler);
-    if (this._io) this._io.disconnect();
+    if (_feedSharedObserver) _feedSharedObserver.unobserve(this.container);
+    delete _feedPlayersById[this.postId];
+    delete _feedVideoRatios[this.postId];
+    if (_feedActiveVideoId === this.postId) _feedActiveVideoId = null;
   }
 
   togglePlay() {
