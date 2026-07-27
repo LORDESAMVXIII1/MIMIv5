@@ -310,9 +310,28 @@
 
   .post-loc { display:flex; align-items:center; gap:5px; padding:0 14px 10px; font-size:12.5px; color:var(--accent); font-weight:600; }
   .post-actions { display:flex; align-items:center; padding:6px 8px 2px; }
-  .act-btn { background:none; border:none; cursor:pointer; display:flex; align-items:center; gap:5px; padding:8px 10px; font-size:13px; font-weight:600; border-radius:10px; color:var(--sub); }
-  .act-btn.fire-pop svg { animation:firePop .22s ease; }
-  @keyframes firePop { 0%{transform:scale(1);} 45%{transform:scale(1.35);} 100%{transform:scale(1);} }
+  .act-btn { position:relative; background:none; border:none; cursor:pointer; display:flex; align-items:center; gap:5px; padding:8px 10px; font-size:13px; font-weight:600; border-radius:10px; color:var(--sub); }
+  .act-btn.fire-pop svg { animation:firePop .28s cubic-bezier(.34,1.56,.64,1); }
+  @keyframes firePop { 0%{transform:scale(1);} 45%{transform:scale(1.4) rotate(-4deg);} 100%{transform:scale(1);} }
+  /* Partículas de fogo do botão de reação (protótipo "Labaredas").
+     A camada .fire-fx é um ponto de origem sem tamanho, ancorado no ícone;
+     cada partícula é posicionada em relação a ele. */
+  .fire-fx { position:absolute; left:22px; top:20px; width:0; height:0; pointer-events:none; z-index:5; }
+  .fire-fx .fspark { position:absolute; left:0; top:0; border-radius:50%; will-change:transform,opacity; }
+  .fire-fx .fflame { position:absolute; left:0; top:0; border-radius:60% 60% 45% 45%; filter:blur(1.5px); will-change:transform,opacity; }
+  @keyframes fireSparkUp {
+    0%   { transform:translate(0,0) scale(.4); opacity:0; }
+    12%  { opacity:1; }
+    100% { transform:translate(var(--dx),var(--dy)) scale(.2); opacity:0; }
+  }
+  @keyframes fireFlameUp {
+    0%   { transform:translate(0,4px) scale(.35); opacity:0; }
+    18%  { opacity:.95; }
+    60%  { transform:translate(calc(var(--dx) * .55), calc(var(--dy) * .55)) scale(1); }
+    100% { transform:translate(var(--dx),var(--dy)) scale(.15); opacity:0; }
+  }
+  @media (prefers-reduced-motion: reduce) { .fire-fx { display:none; } }
+
   .act-btn.like-pop svg { animation:likePop .28s ease; }
   @keyframes likePop { 0%{transform:scale(1);} 35%{transform:scale(1.35);} 100%{transform:scale(1);} }
   .act-btn.liked { color:var(--pink); }
@@ -1785,7 +1804,50 @@ function fireSvg(size, color, filled) {
     '<path d="'+FIRE_PATH+'" fill="none" stroke="url(#'+gid+')" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>' +
     '</svg>';
 }
+// Estouro de partículas do botão de fogo — variação "Labaredas" do protótipo:
+// blobs desfocados que sobem ondulando (amarelo -> vermelho) + faíscas finas.
+// Só DOM + CSS, sem biblioteca; as partículas se removem sozinhas.
+var FIRE_FX_COLORS = ["#fff3b0","#ffcc4d","#ff9f1a","#ff6a00","#ff3b00"];
+function _fireFxEmit(layer, n, o) {
+  for (var i = 0; i < n; i++) {
+    (function() {
+      var el = document.createElement("span");
+      el.className = o.cls;
+      var ang = (-Math.PI / 2) + (Math.random() - .5) * o.spread;
+      var dist = o.min + Math.random() * (o.max - o.min);
+      var size = o.size[0] + Math.random() * (o.size[1] - o.size[0]);
+      var color = FIRE_FX_COLORS[(Math.random() * FIRE_FX_COLORS.length) | 0];
+      el.style.width = size + "px";
+      el.style.height = (o.tall ? size * 1.7 : size) + "px";
+      el.style.marginLeft = (-size / 2) + "px";
+      el.style.background = color;
+      el.style.boxShadow = "0 0 " + (size * 1.6) + "px " + color;
+      el.style.setProperty("--dx", (Math.cos(ang) * dist).toFixed(1) + "px");
+      el.style.setProperty("--dy", (Math.sin(ang) * dist).toFixed(1) + "px");
+      var dur = o.dur[0] + Math.random() * (o.dur[1] - o.dur[0]);
+      var delay = Math.random() * o.stagger;
+      el.style.animation = o.anim + " " + dur + "ms cubic-bezier(.2,.7,.3,1) " + delay + "ms forwards";
+      layer.appendChild(el);
+      setTimeout(function() { if (el.parentNode) el.parentNode.removeChild(el); }, dur + delay + 80);
+    })();
+  }
+}
+function fireBurst(btn) {
+  if (!btn) return;
+  try {
+    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  } catch (e) {}
+  var layer = document.createElement("span");
+  layer.className = "fire-fx";
+  btn.appendChild(layer);
+  _fireFxEmit(layer, 10, { cls:"fflame", anim:"fireFlameUp", spread:.8, min:26, max:56,
+    tall:true, size:[6,13], dur:[700,1050], stagger:220 });
+  _fireFxEmit(layer, 8, { cls:"fspark", anim:"fireSparkUp", spread:1.2, min:20, max:48,
+    size:[2,4], dur:[600,900], stagger:260 });
+  setTimeout(function() { if (layer.parentNode) layer.parentNode.removeChild(layer); }, 1500);
+}
 function cuteFaceSvg(size, color, filled) {
+
   // Coração com gradiente rosa (substitui a antiga carinha feliz) — variante
   // escolhida no protótipo MIMI-coracoes-PROTOTIPO.html ("Gradiente rosa,
   // mesmo espírito visual do 🔥").
@@ -9930,7 +9992,9 @@ function bindPostCardEvents() {
       post.fireTotal = (post.fireTotal || 0) + 1;
       syncReactionButtons(post);
       btn.classList.add("fire-pop");
-      setTimeout(function(){ btn.classList.remove("fire-pop"); }, 220);
+      fireBurst(btn);
+      setTimeout(function(){ btn.classList.remove("fire-pop"); }, 280);
+
       queueFireWrite(pid, post.fireTotal).catch(function(err){
         // A escrita falhou de verdade (não só atraso) — desfaz o toque
         // otimista pra tela não mentir sobre o que está salvo.
