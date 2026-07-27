@@ -9971,7 +9971,24 @@ function bindPostCardEvents() {
     return next;
   }
   appEl.querySelectorAll("[data-fire]").forEach(function(btn) {
+    // Guarda anti-listener-duplicado: bindPostActions pode rodar mais de
+    // uma vez sobre o mesmo botão (o elemento sobrevive entre renders
+    // parciais como o syncReactionButtons). Sem isso, cada re-bind
+    // acumulava um novo listener e um único toque contava como 2, 3…
+    // — foi o que fazia o limite de 5 bater em ~3 toques rápidos.
+    if (btn.dataset.fireBound === "1") return;
+    btn.dataset.fireBound = "1";
     btn.addEventListener("click", function() {
+      // Trava de deduplicação por toque: no mobile, um toque rápido pode
+      // gerar um `click` sintético logo depois do touchend (e alguns
+      // navegadores disparam 2 clicks quando o usuário martela o botão
+      // muito rápido). Ignora qualquer clique que chegue < 60ms depois
+      // do anterior no MESMO botão — imperceptível pro humano, mas mata
+      // o clique-fantasma.
+      var now = Date.now();
+      var last = Number(btn.dataset.fireLastClick || 0);
+      if (now - last < 60) return;
+      btn.dataset.fireLastClick = String(now);
       var pid = btn.getAttribute("data-fire");
       var post = posts.find(function(p){ return p.id === pid; });
       if (!post) return;
