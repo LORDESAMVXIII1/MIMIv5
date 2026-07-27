@@ -1410,6 +1410,13 @@
   .edit-overlay { position:fixed; inset:0; background:var(--bg); z-index:250; display:flex; flex-direction:column; max-width:480px; margin:0 auto; }
   .edit-header { display:flex; align-items:center; justify-content:space-between; padding:16px 16px 12px; border-bottom:1px solid var(--border); }
   .edit-body { flex:1; overflow:auto; padding:20px 16px; }
+  .support-faq-list { margin-bottom:8px; }
+  .support-faq-item { border:1px solid var(--border); border-radius:14px; margin-bottom:10px; overflow:hidden; background:var(--card,#fff); }
+  .support-faq-q { width:100%; display:flex; align-items:center; justify-content:space-between; gap:10px; text-align:left; background:none; border:none; padding:14px 14px; font-size:14px; font-weight:700; color:var(--text); cursor:pointer; }
+  .support-faq-chevron { flex-shrink:0; display:flex; transition:transform .2s ease; }
+  .support-faq-item.open .support-faq-chevron { transform:rotate(180deg); }
+  .support-faq-a { max-height:0; overflow:hidden; padding:0 14px; font-size:13.5px; line-height:1.5; color:var(--sub); transition:max-height .25s ease, padding .25s ease; }
+  .support-faq-item.open .support-faq-a { max-height:240px; padding:0 14px 14px; }
   .edit-avatar-wrap { display:flex; justify-content:center; margin-bottom:22px; position:relative; }
   .edit-avatar-cam { position:absolute; bottom:0; right:calc(50% - 50px); z-index:5; background:var(--accent); border-radius:50%; width:30px; height:30px; display:flex; align-items:center; justify-content:center; border:2px solid var(--surface); cursor:pointer; }
   .edit-field-label { font-size:12.5px; font-weight:700; color:var(--sub); margin-bottom:6px; display:block; }
@@ -7520,6 +7527,7 @@ var state = {
   confirmDialog: null,
   paywallDialog: null, // aviso "recurso MIMI Plus" mais elaborado que o confirmDialog genérico
   editProfileOpen: false,
+  supportOpen: false,
   searchQuery: "",
   replyTarget: null,
   userSearchOpen: false,
@@ -8086,6 +8094,7 @@ function _renderImpl() {
   if (musicSearch.open) html += renderMusicSearchModal();
   if (state.vibeDraft) html += renderVibeComposePage();
   if (state.editProfileOpen) html += renderEditProfile();
+  if (state.supportOpen) html += renderSupportPage();
   if (state.subsOpen) html += renderSubsPage();
   if (state.viewingStoryIdx !== null) html += renderStoryViewer();
   if (state.photoViewerUrl) html += renderPhotoViewer();
@@ -8131,6 +8140,7 @@ function _renderImpl() {
   if (musicSearch.open) bindMusicSearchModal();
   if (state.vibeDraft) bindVibeComposePage();
   if (state.editProfileOpen) bindEditProfile();
+  if (state.supportOpen) bindSupportPage();
   if (state.subsOpen) bindSubsPage();
   if (state.viewingStoryIdx !== null) bindStoryViewer();
   if (state.photoViewerUrl) bindPhotoViewer();
@@ -8965,7 +8975,7 @@ function closeStoryComments() {
 function hasOpenOverlay() {
   return !!(
     state.followListFor || state.publishMenu || state.creating || musicSearch.open ||
-    state.editProfileOpen || state.subsOpen || state.viewingStoryIdx !== null ||
+    state.editProfileOpen || state.supportOpen || state.subsOpen || state.viewingStoryIdx !== null ||
     activeCall || incomingCall || state.actionSheetPostId || state.profileSheetUserId ||
     state.confirmDialog || state.paywallDialog || state.addBooksSheetOpen || state.bookPicker ||
     state.isbnScanOpen || state.bookAddDraft || state.bookActionFor ||
@@ -15720,6 +15730,107 @@ function bindEditProfile() {
   });
 }
 
+// ─── SUPPORT / CENTRAL DE AJUDA ───────
+// Número de WhatsApp do suporte, em formato internacional sem espaços/símbolos
+// (ex: "5511999999999"). Preencher com o número real antes de publicar.
+var SUPPORT_WHATSAPP_NUMBER = "5588933008422";
+var SUPPORT_EMAIL = "franciscoviei123@gmail.com";
+
+var SUPPORT_FAQ = [
+  {
+    q: "Esqueci minha senha, e agora?",
+    a: "Na tela de login, toque em \"Esqueci minha senha\" e siga o passo a passo. Enviamos um link de recuperação para o e-mail cadastrado na sua conta."
+  },
+  {
+    q: "Como bloqueio alguém?",
+    a: "Segure o dedo (toque e segure) sobre um comentário ou mensagem da pessoa e escolha a opção de bloquear. Quem for bloqueado não consegue mais ver seu perfil nem te enviar mensagens."
+  },
+  {
+    q: "Meus dados estão seguros no MIMI?",
+    a: "Sim! Levamos a segurança a sério — você pode ativar a verificação em duas etapas em Configurações > Segurança para uma camada extra de proteção no login."
+  },
+  {
+    q: "Como funciona o MIMI Plus?",
+    a: "O MIMI Plus é o plano premium do app, com recursos extras. Você pode ver os detalhes e assinar direto na seção correspondente do seu perfil."
+  },
+  {
+    q: "Como denuncio um conteúdo ou perfil?",
+    a: "Toque nos três pontinhos (⋯) no post, comentário ou perfil que quiser denunciar e escolha a opção de denúncia. Nossa equipe analisa cada caso."
+  },
+  {
+    q: "Quero excluir minha conta. É possível?",
+    a: "É, sim. Entre em contato com o suporte pelos canais abaixo explicando o pedido — vamos te ajudar a concluir a exclusão com segurança."
+  }
+];
+
+function renderSupportPage() {
+  var faqHtml = SUPPORT_FAQ.map(function(item, i) {
+    return (
+      '<div class="support-faq-item" data-faq-item="'+i+'">' +
+        '<button class="support-faq-q" data-faq-toggle="'+i+'">' +
+          '<span>'+esc(item.q)+'</span>' +
+          '<span class="support-faq-chevron" data-faq-chevron="'+i+'">'+icoSvg("chevronDown",18,"var(--muted)")+'</span>' +
+        '</button>' +
+        '<div class="support-faq-a" data-faq-answer="'+i+'">'+esc(item.a)+'</div>' +
+      '</div>'
+    );
+  }).join("");
+
+  var waHref = SUPPORT_WHATSAPP_NUMBER
+    ? "https://wa.me/"+SUPPORT_WHATSAPP_NUMBER+"?text="+encodeURIComponent("Oi! Preciso de ajuda com o MIMI 💗")
+    : "";
+
+  return '<div class="edit-overlay fade-in">' +
+    '<div class="edit-header">' +
+      '<button class="icon-btn" data-close-support style="color:var(--sub);">'+icoSvg("close",22)+'</button>' +
+      '<span style="font-weight:800;font-size:16px;">Central de ajuda</span>' +
+      '<span style="width:22px;"></span>' +
+    '</div>' +
+    '<div class="edit-body">' +
+      '<p style="text-align:center;color:var(--sub);font-size:13.5px;margin:0 0 18px;">Como podemos te ajudar hoje? Dá uma olhada nas perguntas mais comuns ou fala direto com a gente 💌</p>' +
+
+      '<div class="cfg-section-title" style="margin-top:0;">Perguntas frequentes</div>' +
+      '<div class="support-faq-list">' + faqHtml + '</div>' +
+
+      '<div class="cfg-section-title">Ainda precisa de ajuda?</div>' +
+
+      '<a class="cfg-item" href="mailto:'+SUPPORT_EMAIL+'" style="text-decoration:none;">' +
+        '<div class="cfg-item-icon" style="background:#fff0f6;">'+icoSvg("mail",20,C.accent)+'</div>' +
+        '<div class="grow">' +
+          '<div class="cfg-item-label">Falar por e-mail</div>' +
+          '<div class="cfg-item-sub">'+esc(SUPPORT_EMAIL)+'</div>' +
+        '</div>' +
+        icoSvg("share",16,"var(--muted)") +
+      '</a>' +
+
+      (waHref
+        ? '<a class="cfg-item" href="'+waHref+'" target="_blank" rel="noopener" style="text-decoration:none;">' +
+            '<div class="cfg-item-icon" style="background:#e9fbf2;">'+icoSvg("phone",20,C.green)+'</div>' +
+            '<div class="grow">' +
+              '<div class="cfg-item-label">Falar no WhatsApp</div>' +
+              '<div class="cfg-item-sub">Resposta mais rápida por aqui</div>' +
+            '</div>' +
+            icoSvg("share",16,"var(--muted)") +
+          '</a>'
+        : '') +
+
+    '</div>' +
+  '</div>';
+}
+
+function bindSupportPage() {
+  var closeBtn = appEl.querySelector("[data-close-support]");
+  if (closeBtn) closeBtn.addEventListener("click", function() { state.supportOpen = false; render(); });
+
+  appEl.querySelectorAll("[data-faq-toggle]").forEach(function(btn) {
+    btn.addEventListener("click", function() {
+      var idx = btn.getAttribute("data-faq-toggle");
+      var item = appEl.querySelector('[data-faq-item="'+idx+'"]');
+      if (item) item.classList.toggle("open");
+    });
+  });
+}
+
 // ─── EMOJI PANEL (shared between create-post and chat) ───────
 function renderEmojiPanel() {
   var grid = EMOJIS.map(function(e){ return '<button data-emoji-pick="'+e+'">'+e+'</button>'; }).join("");
@@ -16202,14 +16313,14 @@ function renderSettingsPage() {
 
   // Suporte
   '<div class="cfg-section-title">Suporte</div>' +
-  '<a class="cfg-item" href="mailto:franciscoviei123@gmail.com" style="text-decoration:none;">' +
+  '<div class="cfg-item" data-open-support style="cursor:pointer;">' +
     '<div class="cfg-item-icon" style="background:#fff0f6;">'+icoSvg("mail",20,C.accent)+'</div>' +
     '<div class="grow">' +
-      '<div class="cfg-item-label">Entrar em contato</div>' +
-      '<div class="cfg-item-sub">franciscoviei123@gmail.com</div>' +
+      '<div class="cfg-item-label">Central de ajuda</div>' +
+      '<div class="cfg-item-sub">Perguntas frequentes, e-mail e WhatsApp</div>' +
     '</div>' +
     icoSvg("share",16,"var(--muted)") +
-  '</a>' +
+  '</div>' +
 
   // Segurança
   '<div class="cfg-section-title">Segurança</div>' +
@@ -16268,6 +16379,12 @@ function bindSettingsPage() {
   if (mfaEnrollBtn) mfaEnrollBtn.addEventListener("click", function() {
     if (!_idToken) { showToast("Faça login novamente para ativar a verificação em duas etapas."); return; }
     openMfaEnrollFlow();
+  });
+
+  var openSupportBtn = appEl.querySelector("[data-open-support]");
+  if (openSupportBtn) openSupportBtn.addEventListener("click", function() {
+    state.supportOpen = true;
+    render();
   });
 
   var ageVerifyBtn = appEl.querySelector("[data-open-age-verify]");
