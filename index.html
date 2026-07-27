@@ -6193,6 +6193,12 @@ function backgroundRender() {
   // a tela "piscava" e era preciso tocar em Aceitar 2-3 vezes. Agora só
   // marcamos como pendente e aplicamos assim que a chamada acabar/atender.
   if (incomingCall || activeCall) { _pendingBackgroundRender = true; return; }
+  // FIX: a Central de ajuda (FAQ) fechava/piscava sozinha porque qualquer
+  // poll de fundo (stories, notificações, reações) reconstruía a tela
+  // inteira por baixo enquanto a pessoa lia um tópico aberto — mesma causa
+  // dos outros casos acima. Só marcamos como pendente e aplicamos o render
+  // quando a tela de suporte for fechada.
+  if (state.supportOpen) { _pendingBackgroundRender = true; return; }
   // FIX: o menu de reação/opções da mensagem (segurar a bolha pra reagir),
   // o mesmo menu reaproveitado no perfil de comentário e na lista de
   // conversas (todos com a classe .convo-action-menu), o seletor de tema
