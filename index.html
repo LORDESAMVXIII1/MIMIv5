@@ -2704,11 +2704,39 @@ function postFireCount(p) { return p.fireTotal || 0; }
 // continuar reagindo naquela publicação no mesmo dia.
 var FIRE_DAILY_LIMIT = 5;
 function _todayKey() { var d = new Date(); return d.getFullYear()+"-"+(d.getMonth()+1)+"-"+d.getDate(); }
+// FIX: o contador diário de toques de fogo vivia só dentro do objeto do
+// post em memória (post.fireDaily). Só que loadPosts() SUBSTITUI o array
+// `posts` inteiro por objetos novos vindos do servidor (que nunca guarda
+// fireDaily — só fireTotal), e isso acontece várias vezes durante o uso
+// normal do app (reconexão, retry em segundo plano, etc). Toda vez que
+// isso rolava no meio do dia, o contador local voltava a 0 sem avisar, e
+// dependendo de QUANDO a recontagem pegava o usuário no meio da sequência
+// de toques, o limite de 5 podia bater de forma inconsistente (às vezes
+// cedo demais) porque o número que a tela mostrava não era mais o mesmo
+// que o postFireLimitReached() estava somando. Agora o contador fica
+// salvo no localStorage do aparelho (por usuário) e é sempre lido de lá —
+// não depende mais do objeto do post sobreviver a um reload.
+function _fireDailyStorageKey() { return "mimi_fire_daily_" + ME_ID; }
+function _loadFireDailyStore() {
+  try { return JSON.parse(localStorage.getItem(_fireDailyStorageKey())) || {}; } catch(e) { return {}; }
+}
+function _saveFireDailyStore(store) {
+  try { localStorage.setItem(_fireDailyStorageKey(), JSON.stringify(store)); } catch(e) {}
+}
+function _persistMyFireToday(postId, entry) {
+  var store = _loadFireDailyStore();
+  store[postId] = entry;
+  _saveFireDailyStore(store);
+}
 function getMyFireToday(p) {
-  p.fireDaily = p.fireDaily || {};
-  var entry = p.fireDaily[ME_ID];
   var today = _todayKey();
-  if (!entry || entry.date !== today) { entry = { date: today, count: 0 }; p.fireDaily[ME_ID] = entry; }
+  var store = _loadFireDailyStore();
+  var entry = store[p.id];
+  if (!entry || entry.date !== today) { entry = { date: today, count: 0 }; }
+  // mantém uma cópia em post.fireDaily também, só por compatibilidade com
+  // qualquer outro trecho do código que ainda leia daí.
+  p.fireDaily = p.fireDaily || {};
+  p.fireDaily[ME_ID] = entry;
   return entry;
 }
 function postMyFireCount(p) { return getMyFireToday(p).count; }
@@ -8884,9 +8912,24 @@ function hasOpenOverlay() {
 }
 
 // ─── ADVANCED VIDEO PLAYER (NOVO PLAYER PROFISSIONAL) ────────────────────────────────
+// FIX: vídeos do Feed demorando muito pra abrir. Duas causas:
+// 1) o <video> não tinha preload definido, então o navegador tentava
+//    baixar o vídeo inteiro antes de mostrar a primeira imagem — em vez
+//    de só o suficiente pra saber duração/tamanho e mostrar o primeiro
+//    quadro rápido.
+// 2) a URL salva era a original enviada pro Cloudinary, sem nenhuma
+//    otimização — Cloudinary consegue entregar uma versão bem mais leve
+//    (formato/qualidade automáticos por aparelho) só adicionando
+//    "q_auto,f_auto" na URL, sem precisar reprocessar nada no upload.
+function optimizeCloudinaryVideoUrl(src) {
+  if (!src || src.indexOf("res.cloudinary.com") === -1) return src;
+  if (src.indexOf("/upload/q_auto") !== -1 || src.indexOf("/upload/f_auto") !== -1) return src;
+  return src.replace("/upload/", "/upload/q_auto,f_auto/");
+}
 function renderMimiPlayer(src, postId) {
+  var optimizedSrc = optimizeCloudinaryVideoUrl(src);
   return '<div class="advanced-player" id="player-'+postId+'">' +
-    '<video id="video-'+postId+'" src="'+src+'" playsinline></video>' +
+    '<video id="video-'+postId+'" src="'+optimizedSrc+'" playsinline preload="metadata"></video>' +
     '<div class="loading-spinner" id="loader-'+postId+'"></div>' +
     '<div class="error-message" id="error-'+postId+'"></div>' +
     '<button class="center-play-btn" id="centerPlayBtn-'+postId+'" title="Play"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></button>' +
@@ -8913,6 +8956,29 @@ function renderMimiPlayer(src, postId) {
       '</div>' +
     '</div>' +
   '</div>';
+}
+
+// FIX: antes, todo vídeo do Feed sempre começava mudo, e ao rolar a tela
+// (o vídeo saindo e voltando a aparecer) o autoplay forçava muted=true de
+// novo mesmo que a pessoa já tivesse ligado o som manualmente — ou seja,
+// a escolha de ouvir com som nunca "grudava". Agora existe uma preferência
+// global (igual ao Instagram): ligar o som em QUALQUER vídeo liga em
+// todos os outros — os que já estão na tela e os que ainda vão aparecer
+// rolando o feed — e fica assim até a pessoa desligar de novo (também em
+// só um toque). A preferência fica salva no aparelho.
+function getFeedSoundOn() {
+  try { return localStorage.getItem("mimi_feed_sound_on") === "1"; } catch(e) { return false; }
+}
+function setFeedSoundOn(on) {
+  try { localStorage.setItem("mimi_feed_sound_on", on ? "1" : "0"); } catch(e) {}
+}
+function applyFeedSoundToAllVideos(soundOn) {
+  document.querySelectorAll('.advanced-player video').forEach(function(v) {
+    v.muted = !soundOn;
+    var pid = v.id.replace('video-', '');
+    var iconEl = document.getElementById('muteIcon-'+pid);
+    if (iconEl) iconEl.innerHTML = sparkleIcon(soundOn ? "volumeOn" : "volumeOff", 26);
+  });
 }
 
 // ─── BIND ADVANCED VIDEO PLAYERS ────────────────────────────────
@@ -8957,9 +9023,9 @@ class AdvancedVideoPlayer {
           // a música/vídeo que já esteja audível em outra publicação. A
           // pessoa decide o que quer ouvir tocando no botão de som.
           if (self.video.paused) {
-            self.video.muted = true;
+            self.video.muted = !getFeedSoundOn();
             var iconEl = document.getElementById('muteIcon-'+self.postId);
-            if (iconEl) iconEl.innerHTML = sparkleIcon("volumeOff", 26);
+            if (iconEl) iconEl.innerHTML = sparkleIcon(self.video.muted ? "volumeOff" : "volumeOn", 26);
             var playPromise = self.video.play();
             if (playPromise && playPromise.catch) playPromise.catch(function(){});
           }
@@ -8994,28 +9060,21 @@ class AdvancedVideoPlayer {
     document.getElementById('fullscreenBtn-'+pid)?.addEventListener('click', () => this.toggleFullscreen());
     document.getElementById('progressBar-'+pid)?.addEventListener('click', (e) => this.seek(e));
     document.getElementById('muteBtn-'+pid)?.addEventListener('click', (e) => { e.stopPropagation(); this.toggleMute(); });
-    // FIX: vídeo agora começa MUDO por padrão (antes começava com som ligado).
-    // Isso é necessário pro autoplay ao rolar o feed não brigar com outras
-    // publicações que já estejam tocando (vídeo ou música) — com todo mundo
-    // mudo por padrão, vários posts podem tocar ao mesmo tempo sem barulho
-    // nenhum se sobrepor; a pessoa decide qual quer ouvir tocando no botão
-    // de som daquele post específico (toggleMute).
-    this.video.muted = true;
+    // Aplica a preferência global de som (ligada/desligada pela pessoa em
+    // qualquer vídeo anteriormente) a este vídeo recém-criado também.
+    this.video.muted = !getFeedSoundOn();
   }
 
   toggleMute() {
-    this.video.muted = !this.video.muted;
-    var iconEl = document.getElementById('muteIcon-'+this.postId);
-    if (iconEl) iconEl.innerHTML = sparkleIcon(this.video.muted ? "volumeOff" : "volumeOn", 26);
-    // A pessoa escolheu ouvir este vídeo especificamente — silencia (sem
-    // pausar) qualquer outro vídeo/música que esteja audível no momento,
-    // pra não tocar dois sons ao mesmo tempo. Os outros continuam tocando
-    // normalmente, só ficam mudos.
-    if (!this.video.muted) {
-      var myVideo = this.video;
-      document.querySelectorAll('.advanced-player video').forEach(function(v) {
-        if (v !== myVideo && !v.muted) v.muted = true;
-      });
+    // A pessoa ligou/desligou o som deste vídeo — isso agora vale pra
+    // TODOS os vídeos do Feed, os que já estão na tela e os que ainda vão
+    // aparecer rolando (preferência global, salva no aparelho).
+    var soundOn = this.video.muted; // estava mudo → o toque liga o som
+    setFeedSoundOn(soundOn);
+    applyFeedSoundToAllVideos(soundOn);
+    if (soundOn) {
+      // Silencia (sem pausar) qualquer música que esteja audível no
+      // momento, pra não tocar dois sons ao mesmo tempo.
       document.querySelectorAll('audio[data-track-audio]').forEach(function(a) {
         if (!a.muted) a.muted = true;
       });
@@ -9867,6 +9926,7 @@ function bindPostCardEvents() {
       }
       var entry = getMyFireToday(post);
       entry.count++;
+      _persistMyFireToday(pid, entry);
       post.fireTotal = (post.fireTotal || 0) + 1;
       syncReactionButtons(post);
       btn.classList.add("fire-pop");
@@ -9875,6 +9935,7 @@ function bindPostCardEvents() {
         // A escrita falhou de verdade (não só atraso) — desfaz o toque
         // otimista pra tela não mentir sobre o que está salvo.
         entry.count = Math.max(0, entry.count - 1);
+        _persistMyFireToday(pid, entry);
         post.fireTotal = Math.max(0, (post.fireTotal || 0) - 1);
         syncReactionButtons(post);
         // TEMP DEBUG: mostra a mensagem de erro real no toast (não só
