@@ -18922,7 +18922,15 @@ var VibesModule = {
   bindEvents: function() {
     var self = this;
     var appEl = getAppEl();
-    
+
+    // Abre o perfil do autor ao tocar no avatar/nome exibidos sobre o vídeo
+    appEl.querySelectorAll("[data-open-author]").forEach(function(el) {
+      el.addEventListener("click", function(e) {
+        e.stopPropagation();
+        openProfile(el.getAttribute("data-open-author"));
+      });
+    });
+
     // Like button
     appEl.querySelectorAll(".vibe-like-btn").forEach(function(btn) {
       btn.addEventListener("click", function() {
