@@ -1288,6 +1288,17 @@
   .track-player-heart.active { color:rgb(var(--tp-rgb,255,111,165)); }
   .track-player-heart svg { transition:transform .25s cubic-bezier(.3,1.5,.4,1); }
   .track-player-heart.active svg { transform:scale(1.15); }
+
+  /* Editor de trecho (trim) de áudio no compositor de post */
+  .audio-trim { margin-top:12px; }
+  .audio-trim-labels { display:flex; justify-content:space-between; font-size:11px; color:var(--muted); margin-bottom:6px; font-weight:600; }
+  .audio-trim-track { position:relative; height:38px; border-radius:12px; background:var(--bg); border:1px solid var(--border); touch-action:none; user-select:none; }
+  .audio-trim-range { position:absolute; top:0; bottom:0; background:rgba(255,111,165,.22); border-top:2px solid var(--accent); border-bottom:2px solid var(--accent); box-sizing:border-box; pointer-events:none; }
+  .audio-trim-handle { position:absolute; top:-1px; bottom:-1px; width:16px; margin-left:-8px; border-radius:8px; background:linear-gradient(135deg,var(--accent),var(--accentL)); cursor:ew-resize; touch-action:none; box-shadow:0 2px 8px rgba(0,0,0,.25); display:flex; align-items:center; justify-content:center; }
+  .audio-trim-handle::after { content:""; width:2px; height:14px; background:#fff; border-radius:2px; opacity:.85; }
+  .audio-trim-actions { display:flex; align-items:center; gap:10px; margin-top:10px; }
+  .audio-trim-play { background:var(--accent); color:#fff; border:none; border-radius:50%; width:34px; height:34px; flex-shrink:0; display:flex; align-items:center; justify-content:center; cursor:pointer; }
+  .audio-trim-hint { font-size:11.5px; color:var(--sub); }
   .subs-btn-cancel { background:transparent; color:#FF3D93; border:1.5px solid #FF3D93; box-shadow:none; font-weight:700; }
   .subs-terms { font-size:11.5px; color:var(--sub); text-align:center; line-height:1.6; }
   .subs-active-card { position:relative; overflow:hidden; background:var(--surface); border:1.5px solid rgba(255,193,7,.5); border-radius:20px; padding:16px 18px; display:flex; align-items:center; gap:14px; margin-bottom:20px; }
@@ -9635,7 +9646,7 @@ function renderTrackPlayer(post) {
           art +
         '</div>' +
         '<div class="track-player-info">' +
-          '<div class="track-player-tag">'+icoSvg("music",12,"currentColor",true)+'<span>Prévia 30s</span></div>' +
+          '<div class="track-player-tag">'+icoSvg("music",12,"currentColor",true)+'<span>'+((typeof pam.trimStart==="number" && typeof pam.trimEnd==="number") ? "Trecho selecionado" : "Prévia 30s")+'</span></div>' +
           '<div class="track-player-title">'+esc(pam.title||"Faixa de áudio")+'</div>' +
           '<div class="track-player-artist">'+esc(pam.artist||"")+'</div>' +
           genreHtml +
@@ -9695,21 +9706,39 @@ function bindTrackPlayers() {
     if (!audio || audio._trackBound) return;
     audio._trackBound = true;
 
+    // Trecho escolhido pelo autor ao publicar (ver renderAudioTrimEditor).
+    // Posts antigos não têm isso — nesse caso toca a prévia inteira, igual
+    // sempre funcionou.
+    var pam = post.audioMeta || {};
+    var tStart = typeof pam.trimStart === "number" ? pam.trimStart : 0;
+    var tEnd = typeof pam.trimEnd === "number" ? pam.trimEnd : null;
+    var seeked = false;
+
     function setPlayIcon(playing) {
       playBtn.innerHTML = icoSvg(playing ? "pause" : "play", 18, "currentColor", true);
       if (vinyl) vinyl.classList.toggle("spinning", playing);
     }
+    function trimEnd() { return tEnd == null ? (audio.duration || 0) : tEnd; }
     function updateProgress() {
-      var dur = audio.duration || 0;
-      var pct = dur ? Math.min(1, audio.currentTime / dur) : 0;
+      var dur = trimEnd() - tStart;
+      var cur = Math.max(0, audio.currentTime - tStart);
+      var pct = dur ? Math.min(1, cur / dur) : 0;
       fill.style.width = (pct * 100) + "%";
       thumb.style.left = (pct * 100) + "%";
-      curEl.textContent = fmtTime(audio.currentTime);
+      curEl.textContent = fmtTime(cur);
       if (dur) durEl.textContent = fmtTime(dur);
       var activeIdx = Math.round(pct * waveBars.length);
       waveBars.forEach(function(bar, i) {
         bar.classList.toggle("played", i < activeIdx);
       });
+    }
+    function ensureStartPosition() {
+      // Garante que a reprodução (manual ou autoplay mudo) sempre comece
+      // no início do trecho escolhido, não no início do arquivo inteiro.
+      if (!seeked && tStart > 0) {
+        audio.currentTime = tStart;
+        seeked = true;
+      }
     }
 
     playBtn.addEventListener("click", function(e) {
@@ -9724,6 +9753,7 @@ function bindTrackPlayers() {
         document.querySelectorAll(".advanced-player video").forEach(function(v) {
           if (!v.muted) v.muted = true;
         });
+        if (audio.currentTime < tStart || audio.currentTime >= trimEnd()) audio.currentTime = tStart;
         audio.play().catch(function(){});
       } else {
         audio.pause();
@@ -9743,6 +9773,7 @@ function bindTrackPlayers() {
       var _tpIo = new IntersectionObserver(function(entries) {
         entries.forEach(function(entry) {
           if (entry.isIntersecting && !hasOpenOverlay() && audio.paused) {
+            ensureStartPosition();
             audio.play().catch(function(){});
           }
         });
@@ -9752,12 +9783,12 @@ function bindTrackPlayers() {
     }
     if (backBtn) backBtn.addEventListener("click", function(e) {
       e.stopPropagation();
-      audio.currentTime = Math.max(0, audio.currentTime - 5);
+      audio.currentTime = Math.max(tStart, audio.currentTime - 5);
       updateProgress();
     });
     if (fwdBtn) fwdBtn.addEventListener("click", function(e) {
       e.stopPropagation();
-      if (audio.duration) audio.currentTime = Math.min(audio.duration, audio.currentTime + 5);
+      audio.currentTime = Math.min(trimEnd(), audio.currentTime + 5);
       updateProgress();
     });
     if (favBtn) favBtn.addEventListener("click", function(e) {
@@ -9768,9 +9799,18 @@ function bindTrackPlayers() {
     });
     audio.addEventListener("play", function() { setPlayIcon(true); });
     audio.addEventListener("pause", function() { setPlayIcon(false); });
+    // Fim do trecho escolhido (ou fim real do arquivo, se não houver trecho):
+    // pausa e volta pro início do trecho, como um "ended" do trecho.
+    audio.addEventListener("timeupdate", function() {
+      if (!audio.paused && audio.currentTime >= trimEnd()) {
+        audio.pause();
+        audio.currentTime = tStart;
+        seeked = true;
+      }
+      updateProgress();
+    });
     audio.addEventListener("ended", function() { setPlayIcon(false); updateProgress(); });
-    audio.addEventListener("timeupdate", updateProgress);
-    audio.addEventListener("loadedmetadata", updateProgress);
+    audio.addEventListener("loadedmetadata", function() { ensureStartPosition(); updateProgress(); });
 
     volBtn.addEventListener("click", function(e) {
       e.stopPropagation();
@@ -9789,7 +9829,9 @@ function bindTrackPlayers() {
     function scrub(clientX) {
       var rect = seek.getBoundingClientRect();
       var pct = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
-      if (audio.duration) audio.currentTime = pct * audio.duration;
+      var dur = trimEnd() - tStart;
+      if (dur > 0) audio.currentTime = tStart + pct * dur;
+      seeked = true;
       fill.style.width = (pct * 100) + "%";
       thumb.style.left = (pct * 100) + "%";
       var activeIdx = Math.round(pct * waveBars.length);
@@ -16153,6 +16195,130 @@ function publishVibeItem(videoSrc, caption) {
   });
 }
 
+// Editor de trecho (trim) do áudio selecionado antes de publicar. Deixa o
+// usuário escolher, dentro da prévia de 30s, qual pedaço vai pro post —
+// a marcação (trimStart/trimEnd) fica salva em compose.audioMeta e o
+// arrasto das alças atualiza o DOM direto (sem chamar render()), pra não
+// travar/piscar a tela a cada movimento do dedo/mouse.
+function renderAudioTrimEditor() {
+  return (
+    '<div class="audio-trim" data-audio-trim>' +
+      '<audio data-trim-audio src="'+esc(compose.media)+'" preload="metadata" style="display:none;"></audio>' +
+      '<div class="audio-trim-labels"><span data-trim-selected>Carregando prévia…</span><span data-trim-total></span></div>' +
+      '<div class="audio-trim-track" data-trim-track>' +
+        '<div class="audio-trim-range" data-trim-range></div>' +
+        '<div class="audio-trim-handle" data-trim-handle="start" style="left:0%;"></div>' +
+        '<div class="audio-trim-handle" data-trim-handle="end" style="left:100%;"></div>' +
+      '</div>' +
+      '<div class="audio-trim-actions">' +
+        '<button type="button" class="audio-trim-play" data-trim-play title="Ouvir trecho selecionado">'+icoSvg("play",16,"#fff",true)+'</button>' +
+        '<span class="audio-trim-hint">Arraste as alças para escolher o trecho que vai ser publicado</span>' +
+      '</div>' +
+    '</div>'
+  );
+}
+
+function bindAudioTrimEditor() {
+  var wrap = appEl.querySelector("[data-audio-trim]");
+  if (!wrap) return;
+  var audio = wrap.querySelector("[data-trim-audio]");
+  var track = wrap.querySelector("[data-trim-track]");
+  var range = wrap.querySelector("[data-trim-range]");
+  var startH = wrap.querySelector('[data-trim-handle="start"]');
+  var endH = wrap.querySelector('[data-trim-handle="end"]');
+  var selectedLbl = wrap.querySelector("[data-trim-selected]");
+  var totalLbl = wrap.querySelector("[data-trim-total]");
+  var playBtn = wrap.querySelector("[data-trim-play]");
+  if (!audio || !track) return;
+
+  var duration = 0;
+  var am = compose.audioMeta || (compose.audioMeta = {});
+  // FIX: sem valor padrão, trimEnd ficava 0 até o metadata carregar e a
+  // primeira pintura das alças ficava com o range zerado (colapsado).
+  var trimStart = typeof am.trimStart === "number" ? am.trimStart : 0;
+  var trimEnd = typeof am.trimEnd === "number" ? am.trimEnd : null;
+
+  function paint() {
+    var d = duration || 1;
+    var pctStart = Math.max(0, Math.min(100, (trimStart / d) * 100));
+    var pctEnd = Math.max(0, Math.min(100, ((trimEnd == null ? d : trimEnd) / d) * 100));
+    startH.style.left = pctStart + "%";
+    endH.style.left = pctEnd + "%";
+    range.style.left = pctStart + "%";
+    range.style.width = Math.max(0, pctEnd - pctStart) + "%";
+    var selSecs = Math.max(0, (trimEnd == null ? d : trimEnd) - trimStart);
+    if (selectedLbl) selectedLbl.textContent = "Trecho: " + fmtTime(selSecs);
+    if (totalLbl && duration) totalLbl.textContent = fmtTime(duration) + " total";
+  }
+
+  audio.addEventListener("loadedmetadata", function() {
+    duration = audio.duration || 0;
+    if (trimEnd == null) trimEnd = duration;
+    am.trimStart = trimStart; am.trimEnd = trimEnd;
+    paint();
+  });
+  // Alguns navegadores já têm a duração pronta no próximo tick (cache)
+  if (audio.readyState >= 1 && audio.duration) {
+    duration = audio.duration;
+    if (trimEnd == null) trimEnd = duration;
+    am.trimStart = trimStart; am.trimEnd = trimEnd;
+    paint();
+  }
+
+  function dragHandle(handleEl, which) {
+    var dragging = false;
+    handleEl.addEventListener("pointerdown", function(e) {
+      e.stopPropagation();
+      dragging = true;
+      handleEl.setPointerCapture(e.pointerId);
+    });
+    handleEl.addEventListener("pointermove", function(e) {
+      if (!dragging || !duration) return;
+      e.stopPropagation();
+      var rect = track.getBoundingClientRect();
+      var pct = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+      var secs = pct * duration;
+      var MIN_GAP = Math.min(1.5, duration * 0.05 || 1.5);
+      if (which === "start") {
+        trimStart = Math.min(secs, (trimEnd == null ? duration : trimEnd) - MIN_GAP);
+        trimStart = Math.max(0, trimStart);
+      } else {
+        trimEnd = Math.max(secs, trimStart + MIN_GAP);
+        trimEnd = Math.min(duration, trimEnd);
+      }
+      am.trimStart = trimStart; am.trimEnd = trimEnd;
+      // Atualiza só o DOM local do trim — nada de render() aqui, é o que
+      // causava a tela piscar/travar a cada pequeno movimento do dedo.
+      paint();
+      audio.currentTime = which === "start" ? trimStart : trimEnd;
+    });
+    handleEl.addEventListener("pointerup", function(e) { dragging = false; handleEl.releasePointerCapture(e.pointerId); });
+    handleEl.addEventListener("pointercancel", function() { dragging = false; });
+  }
+  dragHandle(startH, "start");
+  dragHandle(endH, "end");
+
+  if (playBtn) {
+    playBtn.addEventListener("click", function(e) {
+      e.stopPropagation();
+      if (!audio.paused) { audio.pause(); playBtn.innerHTML = icoSvg("play",16,"#fff",true); return; }
+      audio.currentTime = trimStart;
+      audio.play().catch(function(){});
+      playBtn.innerHTML = icoSvg("pause",16,"#fff",true);
+    });
+  }
+  audio.addEventListener("timeupdate", function() {
+    if (trimEnd != null && audio.currentTime >= trimEnd) {
+      audio.pause();
+      audio.currentTime = trimStart;
+      if (playBtn) playBtn.innerHTML = icoSvg("play",16,"#fff",true);
+    }
+  });
+  audio.addEventListener("pause", function() {
+    if (playBtn) playBtn.innerHTML = icoSvg("play",16,"#fff",true);
+  });
+}
+
 function renderCreatePost() {
   var mediaPreview = "";
   if (compose.media) {
@@ -16169,9 +16335,9 @@ function renderCreatePost() {
         : "";
       mediaPreview = '<div class="create-preview-wrap" style="padding:14px 16px;background:var(--bg);border-radius:16px;display:flex;flex-wrap:wrap;align-items:center;gap:12px;">' +
         audioIcon + audioLabel +
-        '<audio controls src="'+compose.media+'" style="flex:1;min-width:160px;height:36px;"></audio>' +
-        '<button class="create-remove-media" style="position:static;background:none;color:var(--muted);" data-remove-media>'+icoSvg("close",18,"var(--muted)")+'</button>' +
-        '</div>';
+        '<button class="create-remove-media" style="position:static;background:none;color:var(--muted);margin-left:auto;" data-remove-media>'+icoSvg("close",18,"var(--muted)")+'</button>' +
+        '</div>' +
+        renderAudioTrimEditor();
     } else {
       mediaPreview = '<div class="create-preview-wrap"><img src="'+compose.media+'" alt="">' +
         '<button class="create-remove-media" data-remove-media>'+icoSvg("close",16,"#fff")+'</button></div>';
@@ -16218,6 +16384,8 @@ function bindCreatePost() {
   var textarea = appEl.querySelector("[data-post-text]");
   var charCount = appEl.querySelector("[data-char-count]");
   var fileInput = appEl.querySelector("[data-create-file-input]");
+
+  bindAudioTrimEditor();
 
   if (textarea) {
     textarea.focus();
