@@ -11339,7 +11339,7 @@ function renderMsgsPage() {
   var hasNormalConvos = pinnedConvos.length > 0 || activeConvos.length > 0;
   if (hasNormalConvos === 0 && !state.userSearchOpen) {
     html += '<div style="padding:60px 20px;text-align:center;color:var(--muted);">' +
-      '<div style="font-size:40px;margin-bottom:12px;">💌</div>' +
+      '<div style="margin-bottom:12px;display:flex;justify-content:center;">'+icoSvg("msg",40,"var(--muted)")+'</div>' +
       '<p style="font-weight:700;margin:0 0 6px;color:var(--sub);">Nenhuma conversa ainda</p>' +
       '<p style="font-size:13px;margin:0;">Toca no + para encontrar alguém</p>' +
     '</div>';
