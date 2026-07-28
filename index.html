@@ -17206,9 +17206,13 @@ function onAuthSuccess(u) {
   cacheUserSnapshot(u);
   // Mostra os posts da última visita na hora, sem esperar a rede — evita
   // a tela em branco enquanto loadPostsWithRetryAndRerender() busca os
-  // dados atualizados (ver cachePostsSnapshot). Só entra se ainda não
-  // tiver nada carregado, pra nunca sobrescrever dados já reais na tela.
-  if (!posts.length) {
+  // dados atualizados (ver cachePostsSnapshot).
+  // FIX: `posts` NUNCA está vazio aqui — o array começa pré-preenchido com
+  // posts de exemplo (p1, p2...) definidos no topo do arquivo. Checar
+  // `!posts.length` nunca disparava o cache. O que identifica "ainda são
+  // os posts fake" é a ausência de `_fromFs` (só posts vindos do Firestore
+  // têm essa flag).
+  if (!posts.some(function(p){ return p._fromFs; })) {
     var _cached = getCachedPosts();
     if (_cached.length) posts = _cached;
   }
