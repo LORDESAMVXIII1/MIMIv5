@@ -1766,14 +1766,19 @@ var SPARKLE_ICONS = {
 // paths que são "sólidos" (preenchidos) em vez de linha/contorno
 var SPARKLE_FILLED = { loc:1, like:1, save:1 };
 
+// Espessura de traço específica por ícone (padrão 1.8px); "comment" usa 1.5px
+// conforme escolhido no protótipo, pra ficar igual à foto de referência.
+var SPARKLE_STROKE_WIDTH = { comment: 1.5 };
+
 function sparkleIcon(name, size, color, active) {
   size = size || 24;
   color = color || "var(--accentL, #ffb3d1)";
   var inner = SPARKLE_ICONS[name] || "";
   var filled = !!SPARKLE_FILLED[name];
+  var strokeWidth = SPARKLE_STROKE_WIDTH[name] || 1.8;
   var styleAttrs = filled
     ? 'fill="'+color+'" stroke="none" style="color:'+color+'"'
-    : 'fill="none" stroke="'+color+'" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="color:'+color+'"';
+    : 'fill="none" stroke="'+color+'" stroke-width="'+strokeWidth+'" stroke-linecap="round" stroke-linejoin="round" style="color:'+color+'"';
   // "loc" tem um miolo vazado (o círculo interno precisa ficar transparente)
   var innerFix = (name === "loc") ? inner.replace('<circle cx="12" cy="10" r="3"/>', '<circle cx="12" cy="10" r="3" fill="var(--card,#fff)"/>') : inner;
   var sparkles =
