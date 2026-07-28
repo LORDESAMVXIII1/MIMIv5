@@ -2616,6 +2616,30 @@ var BOOKS_CATALOG = [
 ];
 
 function userPosts(uidStr) { return posts.filter(function(p){ return p.authorId === uidStr; }); }
+// Vibes publicadas por um usuário — usadas pra aparecerem no perfil dele
+// junto com os posts normais (ver profileTabItems). VibesModule.vibes já
+// guarda TODAS as vibes carregadas (não só as do usuário logado, apesar
+// do nome loadUserVibes), então basta filtrar por vibe.userId.
+function userVibes(uidStr) { return VibesModule.vibes.filter(function(v){ return v.userId === uidStr; }); }
+// Adapta uma vibe pro mesmo "formato de item" usado no perfil (id, authorId,
+// createdAt etc.), só pra exibição — não é um post de verdade, então os
+// cards dela no perfil não usam like/fogo/comentário interativos daqui
+// (isso tudo continua vivendo só dentro do Vibes de verdade).
+function vibeAsProfileItem(v) {
+  return {
+    id: v.id, authorId: v.userId, _isVibe: true,
+    text: v.caption || "", video: v.videoUrl, img: null, audio: null, loc: null,
+    likedBy: v.likedBy || [], createdAt: v.createdAt,
+    time: _relTime(new Date(v.createdAt||Date.now()).toISOString())
+  };
+}
+// Timestamp comparável (ms) pra ordenar posts (createdAt em ISO) e vibes
+// (createdAt já em ms) juntos numa lista só, do mais recente pro mais antigo.
+function _profileItemTs(x) {
+  if (x._isVibe) return x.createdAt || 0;
+  var t = new Date(x.createdAt || 0).getTime();
+  return isNaN(t) ? 0 : t;
+}
 function isFollowing(targetId) { return !!(USERS[ME_ID] && USERS[ME_ID].following && USERS[ME_ID].following.indexOf(targetId) !== -1); }
 
 // ── Seguidores: fonte de verdade ───────────────────────────────
@@ -9878,6 +9902,54 @@ function bindTrackPlayers() {
   });
 }
 
+// Card de uma vibe dentro da lista "posts" do perfil. Diferente do
+// renderPostCard normal: não tem botões de curtir/fogo/comentar
+// funcionando aqui (essas ações vivem só dentro do Vibes de verdade, que
+// tem seu próprio sistema de curtida/comentário) — o card inteiro é
+// clicável e abre a vibe no player, igual Reels/TikTok fazem no perfil.
+function renderVibeProfileCard(v) {
+  var author = USERS[v.authorId] || { name:"Usuário", username:"@usuario", avatar:"https://api.dicebear.com/7.x/avataaars/svg?seed="+v.authorId, verified:false };
+  var liked = (v.likedBy||[]).indexOf(ME_ID) !== -1;
+  return '<div class="post-card" data-open-vibe="'+v.id+'" style="cursor:pointer;">' +
+    '<div class="post-head">' +
+      '<div style="pointer-events:none;">'+avatarHtml(author.avatar,42,false,false,false,null,null,getUserFrame(author))+'</div>' +
+      '<div class="grow">' +
+        '<div class="row" style="gap:4px;">' +
+          '<span class="post-name">'+esc(author.name)+'</span>' +
+          (author.verified ? '<span style="margin-left:2px;">'+userVerifiedBadge(author,17)+'</span>' : "") +
+        '</div>' +
+        '<div class="post-meta">' +
+          '<span class="post-sub">'+esc(author.username)+'</span>' +
+          '<span class="post-sub">·</span>' +
+          '<span class="post-sub">'+esc(v.time)+'</span>' +
+        '</div>' +
+      '</div>' +
+      '<span class="post-sub" style="display:flex;align-items:center;gap:4px;">'+icoSvg("video",14,"var(--muted)")+' Vibe</span>' +
+    '</div>' +
+    (v.text ? '<p class="post-text">'+esc(v.text)+'</p>' : "") +
+    '<div style="position:relative;border-radius:14px;overflow:hidden;background:#000;max-height:420px;aspect-ratio:9/16;">' +
+      '<video src="'+esc(v.video)+'" muted preload="metadata" playsinline style="width:100%;height:100%;object-fit:cover;display:block;"></video>' +
+      '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;">'+icoSvg("play",34,"#fff",true)+'</div>' +
+    '</div>' +
+    '<div class="post-actions">' +
+      '<span class="act-btn" style="pointer-events:none;">'+cuteFaceSvg(24,liked?C.pink:"var(--sub)",liked)+' '+fmtNum((v.likedBy||[]).length)+'</span>' +
+    '</div>' +
+  '</div>';
+}
+// Abre a aba Vibes já na vibe específica que a pessoa tocou no perfil,
+// em vez de simplesmente cair no topo da lista.
+function openVibeFromProfile(vibeId) {
+  state.viewProfileId = null;
+  state.page = "vibes";
+  render();
+  requestAnimationFrame(function() {
+    var idx = VibesModule.vibes.findIndex(function(v){ return v.id === vibeId; });
+    if (idx === -1) return;
+    var el = appEl.querySelector('[data-vibe-idx="'+idx+'"]');
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: "start" });
+  });
+}
+
 function renderPostCard(post, opts) {
   opts = opts || {};
   var author = USERS[post.authorId] || { name: "Usuário", username: "@usuario", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=" + post.authorId, verified: false };
@@ -14728,9 +14800,18 @@ function mimiThumbFallback(imgEl, videoUrl) {
   imgEl.replaceWith(v);
 }
 function profileTabItems(userId, tab) {
-  if (tab === "posts") return userPosts(userId).filter(function(p){ return !p.audio; }); // posts sem áudio (texto/imagem/vídeo)
+  var vibeItems = userVibes(userId).map(vibeAsProfileItem);
+  if (tab === "posts") {
+    return userPosts(userId).filter(function(p){ return !p.audio; }) // posts sem áudio (texto/imagem/vídeo)
+      .concat(vibeItems)
+      .sort(function(a,b){ return _profileItemTs(b) - _profileItemTs(a); });
+  }
   if (tab === "músicas") return userPosts(userId).filter(function(p){ return !!p.audio; }); // só publicações de música
-  if (tab === "mídia") return userPosts(userId).filter(function(p){ return p.img || p.video; });
+  if (tab === "mídia") {
+    return userPosts(userId).filter(function(p){ return p.img || p.video; })
+      .concat(vibeItems)
+      .sort(function(a,b){ return _profileItemTs(b) - _profileItemTs(a); });
+  }
   if (tab === "curtidas") return posts.filter(function(p){ return p.likedBy.indexOf(userId) !== -1 && (p.img||p.video); });
   if (tab === "salvos") return userId===ME_ID ? posts.filter(function(p){ return p.saved && (p.img||p.video); }) : [];
   return [];
@@ -14870,6 +14951,10 @@ function ensureFreshFollowers(userId) {
 
 function renderProfilePage(userId) {
   ensureFreshFollowers(userId);
+  // Garante que VibesModule.vibes esteja carregado mesmo se o usuário nunca
+  // abriu a aba Vibes nesta sessão — senão as vibes dele não apareceriam
+  // aqui (ver userVibes/profileTabItems).
+  if (state.user && !VibesModule._userLoaded) VibesModule.loadUserVibes();
   var u = USERS[userId];
   if (!u) return '<div class="search-empty">Perfil não encontrado.</div>';
   var isMe = userId === ME_ID;
@@ -14893,7 +14978,7 @@ function renderProfilePage(userId) {
         : '<button class="btn btn-sm btn-primary" data-toggle-follow="'+userId+'">'+icoSvg("plus",15,"#fff")+' Seguir</button>') +
       '<button class="btn btn-sm btn-secondary" data-message-user="'+userId+'">'+icoSvg("msg",15)+'</button>';
 
-  var postCount = userPosts(userId).length;
+  var postCount = userPosts(userId).length + userVibes(userId).length;
   var isPlus = isSubscriptionActive(u);
   var ringThemeKey = getRingThemeKey(u);
   var showGlow = isPlus && ringThemeKey !== "none";
@@ -14935,7 +15020,7 @@ function renderProfilePage(userId) {
     if (profileTab === "posts" || profileTab === "músicas") {
       // Lista de posts (com e sem mídia) / lista de publicações de música
       html += '<div>';
-      items.forEach(function(p) { html += renderPostCard(p); });
+      items.forEach(function(p) { html += p._isVibe ? renderVibeProfileCard(p) : renderPostCard(p); });
       html += '</div>';
     } else {
       // Grid de mídia para abas mídia/curtidas/salvos
@@ -14951,7 +15036,9 @@ function renderProfilePage(userId) {
         } else {
           mediaHtml = '<div style="width:100%;height:100%;background:var(--bg);display:flex;align-items:center;justify-content:center;">'+icoSvg("video",24,"var(--muted)")+'</div>';
         }
-        html += '<div class="explore-cell" data-open-post="'+p.id+'" style="cursor:pointer;position:relative;">' +
+        // Vibes usam data-open-vibe (abre o player do Vibes) em vez de
+        // data-open-post (que abre o detalhe de post normal, formato diferente).
+        html += '<div class="explore-cell" data-open-'+(p._isVibe?'vibe':'post')+'="'+p.id+'" style="cursor:pointer;position:relative;">' +
           mediaHtml +
           (p.video ? '<div style="position:absolute;top:5px;right:5px;">'+icoSvg("video",14,"#fff",true)+'</div>' : "") +
         '</div>';
@@ -15034,6 +15121,9 @@ function bindProfilePage(userId) {
   });
   appEl.querySelectorAll("[data-open-post]").forEach(function(el) {
     el.addEventListener("click", function() { openPostDetail(el.getAttribute("data-open-post")); });
+  });
+  appEl.querySelectorAll("[data-open-vibe]").forEach(function(el) {
+    el.addEventListener("click", function() { openVibeFromProfile(el.getAttribute("data-open-vibe")); });
   });
   // Bind interações dos post cards na aba "posts"
   if (profileTab === "posts" || profileTab === "músicas") { bindPostCardEvents(); bindMimiPlayers(); }
@@ -18700,7 +18790,7 @@ var VibesModule = {
       vibes.sort(function(a, b) { return (b.createdAt||0) - (a.createdAt||0); });
       self.vibes = vibes;
       self._loading = false;
-      if (state.page === "vibes") render();
+      render(); // perfil e outras telas também dependem de VibesModule.vibes (ver userVibes)
     }).catch(function(err) {
       console.error("Não foi possível carregar suas vibes:", err);
       showToast(toastWithIcon("Não foi possível carregar suas vibes agora.", "warning", "before"), true);
