@@ -9709,7 +9709,8 @@ function bindTrackPlayers() {
     // Trecho escolhido pelo autor ao publicar (ver renderAudioTrimEditor).
     // Posts antigos não têm isso — nesse caso toca a prévia inteira, igual
     // sempre funcionou.
-    var pam = post.audioMeta || {};
+    var pPost = posts.find(function(p){ return p.id === pid; });
+    var pam = (pPost && pPost.audioMeta) || {};
     var tStart = typeof pam.trimStart === "number" ? pam.trimStart : 0;
     var tEnd = typeof pam.trimEnd === "number" ? pam.trimEnd : null;
     var seeked = false;
