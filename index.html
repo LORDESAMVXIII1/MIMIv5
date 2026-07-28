@@ -9927,8 +9927,8 @@ function renderVibeProfileCard(v) {
       '<span class="post-sub" style="display:flex;align-items:center;gap:4px;">'+icoSvg("video",14,"var(--muted)")+' Vibe</span>' +
     '</div>' +
     (v.text ? '<p class="post-text">'+esc(v.text)+'</p>' : "") +
-    '<div style="position:relative;border-radius:8px;overflow:hidden;background:#000;aspect-ratio:16/9;max-width:100%;max-height:78vh;">' +
-      '<video src="'+esc(v.video)+'" muted preload="metadata" playsinline style="width:100%;height:100%;object-fit:contain;display:block;"></video>' +
+    '<div style="position:relative;overflow:hidden;background:#000;aspect-ratio:9/16;max-height:70vh;width:100%;">' +
+      '<video src="'+esc(v.video)+'" muted preload="metadata" playsinline style="width:100%;height:100%;object-fit:cover;display:block;"></video>' +
       '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;">'+icoSvg("play",34,"#fff",true)+'</div>' +
     '</div>' +
     '<div class="post-actions">' +
