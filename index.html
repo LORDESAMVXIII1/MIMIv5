@@ -312,6 +312,7 @@
   .post-actions { display:flex; align-items:center; padding:6px 8px 2px; }
   .act-btn { position:relative; background:none; border:none; cursor:pointer; display:flex; align-items:center; gap:5px; padding:8px 10px; font-size:13px; font-weight:600; border-radius:10px; color:var(--sub); }
   .act-btn.fire-pop svg { animation:firePop .28s cubic-bezier(.34,1.56,.64,1); }
+  .vibe-fire-btn.fire-pop svg { animation:firePop .28s cubic-bezier(.34,1.56,.64,1); }
   @keyframes firePop { 0%{transform:scale(1);} 45%{transform:scale(1.4) rotate(-4deg);} 100%{transform:scale(1);} }
   /* Partículas de fogo do botão de reação (protótipo "Labaredas").
      A camada .fire-fx é um ponto de origem sem tamanho, ancorado no ícone;
@@ -1810,14 +1811,17 @@ function konvoMenuIcon(type) {
 // selo MIMI Plus); vazio segue o padrão outline dos outros ícones de ação.
 var _fireGradId = 0;
 var FIRE_PATH = "M8.5 14.5A2.5 2.5 0 0011 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 11-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 002.5 2.5z";
-function fireSvg(size, color, filled) {
+function fireSvg(size, color, filled, gradColors) {
   size = size || 20;
   _fireGradId++;
   var gid = "fireGrad" + _fireGradId;
-  return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 24 24" style="opacity:'+(filled?1:.55)+';filter:'+(filled?'drop-shadow(0 0 9px rgba(255,60,0,.85))':'none')+'">' +
+  var g0 = (gradColors && gradColors[0]) || "#ff0000";
+  var g1 = (gradColors && gradColors[1]) || "#ff8800";
+  var glow = (gradColors && gradColors[2]) || "rgba(255,60,0,.85)";
+  return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 24 24" style="opacity:'+(filled?1:.55)+';filter:'+(filled?'drop-shadow(0 0 9px '+glow+')':'none')+'">' +
     '<defs><linearGradient id="'+gid+'" x1="0" y1="1" x2="1" y2="0">' +
-      '<stop offset="0%" stop-color="#ff0000"/>' +
-      '<stop offset="100%" stop-color="#ff8800"/>' +
+      '<stop offset="0%" stop-color="'+g0+'"/>' +
+      '<stop offset="100%" stop-color="'+g1+'"/>' +
     '</linearGradient></defs>' +
     '<path d="'+FIRE_PATH+'" fill="none" stroke="url(#'+gid+')" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>' +
     '</svg>';
@@ -1834,7 +1838,8 @@ function _fireFxEmit(layer, n, o) {
       var ang = (-Math.PI / 2) + (Math.random() - .5) * o.spread;
       var dist = o.min + Math.random() * (o.max - o.min);
       var size = o.size[0] + Math.random() * (o.size[1] - o.size[0]);
-      var color = FIRE_FX_COLORS[(Math.random() * FIRE_FX_COLORS.length) | 0];
+      var palette = o.colors || FIRE_FX_COLORS;
+      var color = palette[(Math.random() * palette.length) | 0];
       el.style.width = size + "px";
       el.style.height = (o.tall ? size * 1.7 : size) + "px";
       el.style.marginLeft = (-size / 2) + "px";
@@ -1850,7 +1855,7 @@ function _fireFxEmit(layer, n, o) {
     })();
   }
 }
-function fireBurst(btn) {
+function fireBurst(btn, colors) {
   if (!btn) return;
   try {
     if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
@@ -1859,9 +1864,9 @@ function fireBurst(btn) {
   layer.className = "fire-fx";
   btn.appendChild(layer);
   _fireFxEmit(layer, 10, { cls:"fflame", anim:"fireFlameUp", spread:.8, min:26, max:56,
-    tall:true, size:[6,13], dur:[700,1050], stagger:220 });
+    tall:true, size:[6,13], dur:[700,1050], stagger:220, colors:colors });
   _fireFxEmit(layer, 8, { cls:"fspark", anim:"fireSparkUp", spread:1.2, min:20, max:48,
-    size:[2,4], dur:[600,900], stagger:260 });
+    size:[2,4], dur:[600,900], stagger:260, colors:colors });
   setTimeout(function() { if (layer.parentNode) layer.parentNode.removeChild(layer); }, 1500);
 }
 function cuteFaceSvg(size, color, filled) {
@@ -2846,6 +2851,41 @@ function getMyFireToday(p) {
 function postMyFireCount(p) { return getMyFireToday(p).count; }
 function postFireLimitReached(p) {
   return !isSubscriptionActive(state.user) && postMyFireCount(p) >= FIRE_DAILY_LIMIT;
+}
+// ── 🔥 roxo/lilás — reação de fogo EXCLUSIVA das Vibes ──────────────────
+// Espelha a lógica acima (postFireCount/getMyFireToday/postFireLimitReached)
+// mas com estado 100% separado: campo próprio (vibe.fireTotal, vive só no
+// doc "vibes" do Firestore) e chave própria de localStorage. Nada aqui lê
+// ou escreve em posts/fireTotal/fireDaily — os dois sistemas não se tocam.
+var VIBE_FIRE_DAILY_LIMIT = FIRE_DAILY_LIMIT;
+// Degradê lilás/roxo do fogo das Vibes — visualmente diferente do
+// laranja/vermelho do Feed, só pra essa reação ficar reconhecível como
+// "a versão das Vibes".
+var VIBE_FIRE_GRADIENT = ["#8b5cf6", "#e9d5ff", "rgba(139,92,246,.85)"];
+var VIBE_FIRE_FX_COLORS = ["#f3e8ff","#d8b4fe","#a855f7","#7c3aed","#6d28d9"];
+function vibeFireCount(v) { return v.fireTotal || 0; }
+function _vibeFireDailyStorageKey() { return "mimi_vibefire_daily_" + ME_ID; }
+function _loadVibeFireDailyStore() {
+  try { return JSON.parse(localStorage.getItem(_vibeFireDailyStorageKey())) || {}; } catch(e) { return {}; }
+}
+function _saveVibeFireDailyStore(store) {
+  try { localStorage.setItem(_vibeFireDailyStorageKey(), JSON.stringify(store)); } catch(e) {}
+}
+function _persistMyVibeFireToday(vibeId, entry) {
+  var store = _loadVibeFireDailyStore();
+  store[vibeId] = entry;
+  _saveVibeFireDailyStore(store);
+}
+function getMyVibeFireToday(v) {
+  var today = _todayKey();
+  var store = _loadVibeFireDailyStore();
+  var entry = store[v.id];
+  if (!entry || entry.date !== today) { entry = { date: today, count: 0 }; }
+  return entry;
+}
+function vibeMyFireCount(v) { return getMyVibeFireToday(v).count; }
+function vibeFireLimitReached(v) {
+  return !isSubscriptionActive(state.user) && vibeMyFireCount(v) >= VIBE_FIRE_DAILY_LIMIT;
 }
 function postShareCount(p) { return p._shares || 0; }
 
@@ -5340,6 +5380,16 @@ var FB = {
     });
   },
 
+  // Mesma ideia do firePost acima, mas gravando no doc da VIBE (coleção
+  // "vibes"), não no post — reação de 🔥 isolada, própria das Vibes.
+  fireVibe: function(vid, newTotal) {
+    if (!_idToken) return Promise.reject(new Error("sem token"));
+    return fsSet("vibes/"+vid, { fireTotal: newTotal }).catch(function(err){
+      console.error("⚠️ fireVibe('"+vid+"') falhou ao salvar no servidor:", err && err.message || err);
+      throw err;
+    });
+  },
+
   // ── STORIES ───────────────────────────────────────────────
   // Um único documento do Firestore tem limite de ~1MB. Para vídeos (que
   // não cabem nisso) dividimos o base64 em vários documentos pequenos na
@@ -5576,6 +5626,7 @@ var FB = {
           likedBy: likedBy,
           likes: likedBy.length,
           liked: likedBy.indexOf(ME_ID) !== -1,
+          fireTotal: d.fireTotal || 0,
           createdAt: d.createdAt ? new Date(d.createdAt).getTime() : Date.now()
         };
       });
@@ -16312,6 +16363,7 @@ function publishVibeItem(videoSrc, caption) {
     likes: 0,
     liked: false,
     likedBy: [],
+    fireTotal: 0,
     createdAt: Date.now()
   };
   state.page = "vibes";
@@ -18854,6 +18906,10 @@ var VibesModule = {
               '<span class="heart-icon">'+sparkleIcon("like",32, vibe.liked?"#ff4d6d":"#fff")+'</span>' +
               '<span class="like-count">'+vibe.likes+'</span>' +
             '</button>' +
+            '<button class="vibe-fire-btn '+(vibeMyFireCount(vibe)>0?"fired":"")+'" data-vibe-idx="'+idx+'">' +
+              '<span class="fire-icon">'+fireSvg(32, null, vibeMyFireCount(vibe)>0, VIBE_FIRE_GRADIENT)+'</span>' +
+              '<span class="fire-count">'+fmtNum(vibeFireCount(vibe))+'</span>' +
+            '</button>' +
             '<button class="vibe-comment-btn" data-vibe-idx="'+idx+'">' +
               sparkleIcon("comment",30,"#fff") +
               '<span class="comment-count">'+fmtNum(getComments(vibe.id).length)+'</span>' +
@@ -18950,6 +19006,63 @@ var VibesModule = {
       });
     });
     
+    // Botão de fogo (🔥 roxo/lilás) — reação exclusiva das Vibes, com fila
+    // de escrita e trava anti-clique-duplicado no mesmo espírito do Feed,
+    // mas totalmente isolada (vibe.fireTotal, chave própria de daily-limit).
+    var _vibeFireWriteChain = {};
+    function queueVibeFireWrite(vid, newTotal) {
+      var prev = _vibeFireWriteChain[vid] || Promise.resolve();
+      var next = prev.catch(function(){}).then(function(){ return FB.fireVibe(vid, newTotal); });
+      _vibeFireWriteChain[vid] = next;
+      return next;
+    }
+    appEl.querySelectorAll(".vibe-fire-btn").forEach(function(btn) {
+      if (btn.dataset.fireBound === "1") return;
+      btn.dataset.fireBound = "1";
+      btn.addEventListener("click", function() {
+        var now = Date.now();
+        var last = Number(btn.dataset.fireLastClick || 0);
+        if (now - last < 60) return;
+        btn.dataset.fireLastClick = String(now);
+        var idx = parseInt(btn.getAttribute("data-vibe-idx"));
+        var vibe = self.vibes[idx];
+        if (!vibe) return;
+        if (vibeFireLimitReached(vibe)) {
+          state.paywallDialog = {
+            icon: "spark",
+            title: "Você já usou seus %%FIRE%% de hoje",
+            text: "No plano gratuito, dá pra reagir com fogo até "+VIBE_FIRE_DAILY_LIMIT+" vezes por dia em cada vibe. Assine o MIMI Plus pra reagir sem limite.",
+            confirmLabel: "Assinar MIMI Plus",
+            onConfirm: function() { state.subsOpen = true; }
+          };
+          render();
+          return;
+        }
+        var entry = getMyVibeFireToday(vibe);
+        entry.count++;
+        _persistMyVibeFireToday(vibe.id, entry);
+        vibe.fireTotal = (vibe.fireTotal || 0) + 1;
+        btn.classList.add("fired");
+        var fireEl = btn.querySelector(".fire-icon");
+        if (fireEl) fireEl.innerHTML = fireSvg(32, null, true, VIBE_FIRE_GRADIENT);
+        var countEl = btn.querySelector(".fire-count");
+        if (countEl) countEl.textContent = fmtNum(vibeFireCount(vibe));
+        btn.classList.add("fire-pop");
+        fireBurst(btn, VIBE_FIRE_FX_COLORS);
+        setTimeout(function(){ btn.classList.remove("fire-pop"); }, 280);
+
+        queueVibeFireWrite(vibe.id, vibe.fireTotal).catch(function(err){
+          entry.count = Math.max(0, entry.count - 1);
+          _persistMyVibeFireToday(vibe.id, entry);
+          vibe.fireTotal = Math.max(0, (vibe.fireTotal || 0) - 1);
+          if (countEl) countEl.textContent = fmtNum(vibeFireCount(vibe));
+          var rawMsg = (err && (err.message || err.status || String(err))) || "erro desconhecido";
+          console.error("🔥 fireVibe falhou:", err);
+          showToast(toastWithIcon("Fogo não salvou: " + rawMsg, "warning", "before"), true);
+        });
+      });
+    });
+
     // Download button — exclusivo para assinantes MIMI Plus
     appEl.querySelectorAll(".vibe-download-btn").forEach(function(btn) {
       btn.addEventListener("click", function() {
