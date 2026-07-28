@@ -8158,7 +8158,7 @@ function _renderImpl() {
   else if (state.page === "profile") pageHtml = renderProfileWithSettings();
   else if (state.page === "settings") pageHtml = renderSettingsPage();
 
-  var html = '<div style="padding-bottom:'+(showBottomNav?72:0)+'px;">' + pageHtml + '</div>';
+  var html = '<div style="padding-bottom:'+((showBottomNav && state.page !== "vibes")?72:0)+'px;">' + pageHtml + '</div>';
   if (showBottomNav) html += renderBottomNav(unreadNotifs, unreadMsgs);
 
   if (state.followListFor) html += renderFollowListPage();
@@ -18818,12 +18818,12 @@ var VibesModule = {
     var html = '<div class="vibes-page">';
     
     if (this.vibes.length === 0 && this._loading) {
-      html += '<div style="display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;color:#fff;padding:20px;">' +
+      html += '<div style="display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;color:#fff;padding:20px;">' +
         '<div style="margin-bottom:20px;">'+icoSvg("sparkle",44,"var(--accentL,#ffb3d1)",true)+'</div>' +
         '<h2>Carregando vibes…</h2>' +
         '</div>';
     } else if (this.vibes.length === 0) {
-      html += '<div style="display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;color:#fff;padding:20px;">' +
+      html += '<div style="display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;color:#fff;padding:20px;">' +
         '<div style="margin-bottom:20px;">'+icoSvg("sparkle",44,"var(--accentL,#ffb3d1)",true)+'</div>' +
         '<h2>Nenhuma Vibe ainda</h2>' +
         '<p style="color:rgba(255,255,255,.6);text-align:center;">Seja o primeiro a criar uma vibe!</p>' +
