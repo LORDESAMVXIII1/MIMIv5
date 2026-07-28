@@ -18252,8 +18252,13 @@ function checkAgeVerificationLinkFromUrl() {
       USERS[_fbUid] = Object.assign({}, USERS[_fbUid]||{}, _optimisticUser);
       ME_ID = _fbUid;
       state.user = USERS[_fbUid];
-      render();
     }
+    // Mesma ideia acima, mas para os posts: mostra os últimos carregados
+    // na visita anterior em vez da tela ficando vazia até o Firestore
+    // responder (ver cachePostsSnapshot / loadPosts).
+    var _optimisticPosts = getCachedPosts();
+    if (_optimisticPosts.length) posts = _optimisticPosts;
+    if ((_optimisticUser && _optimisticUser.uid === _fbUid) || _optimisticPosts.length) render();
     // Valida o token com o Firebase antes de usar
     function validate(token) {
       return fetchWithTimeout(FIRE_AUTH+":lookup?key="+CFG.apiKey, {
