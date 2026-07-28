@@ -8388,13 +8388,8 @@ function renderBottomNav(unreadNotifs, unreadMsgs) {
   var html = '<div class="bottom-nav">';
   tabs.forEach(function(t) {
     var active = state.page === t.id;
-    // O ícone de busca é feito de um círculo + uma linha separada (a alça da
-    // lupa): se for "preenchido" (fill), a linha some e sobra só uma bolinha
-    // sólida. Por isso ele nunca usa o modo fill, mesmo ativo — a cor rosa já
-    // indica que a aba está selecionada.
-    var canFill = t.icon !== "search";
     html += '<button class="nav-btn '+(active?"active":"")+'" data-nav="'+t.id+'">' +
-      icoSvg(t.icon, 26, active ? C.accent : "var(--muted)", active && canFill);
+      icoSvg(t.icon, 26, active ? C.accent : "var(--muted)", false);
     if (t.badge > 0) html += '<div class="nav-badge">'+t.badge+'</div>';
     html += '</button>';
   });
