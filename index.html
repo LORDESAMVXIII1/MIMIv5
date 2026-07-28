@@ -7535,6 +7535,12 @@ function stopChatPolling() {
 var state = {
   user: null,
   page: "feed",
+  // Quantos posts do feed são efetivamente renderizados no DOM. Sem isso,
+  // toda render() (curtir, digitar, o que for) remontava HTML+eventos+
+  // observers pra TODOS os posts do banco — ficava cada vez mais lento
+  // conforme a base crescia, mesmo em telas sem áudio/vídeo nenhum.
+  // Cresce conforme o usuário rola até o fim (ver bindFeedPage).
+  feedRenderLimit: 20,
   creating: false,
   publishMenu: false,
   vibeDraft: null, // { videoUrl, caption } enquanto o usuário escreve a legenda da vibe antes de publicar
@@ -10024,8 +10030,16 @@ function renderFeedPage() {
   '</div>' +
   '<div style="background:var(--surface);border-bottom:1px solid var(--border);padding-top:12px;">' + renderStories() + '</div>' +
   '<div>';
-  getFeedOrder(posts).forEach(function(p) { html += renderPostCard(p); });
+  var _feedOrdered = getFeedOrder(posts);
+  var _feedSlice = _feedOrdered.slice(0, state.feedRenderLimit);
+  _feedSlice.forEach(function(p) { html += renderPostCard(p); });
   html += '</div>';
+  // Sentinel invisível: quando entra na tela, carrega mais posts já
+  // buscados (getFeedOrder(posts) inteiro já está em memória — não gera
+  // requisição nova, só estende quantos são renderizados no DOM).
+  if (_feedOrdered.length > _feedSlice.length) {
+    html += '<div data-feed-sentinel style="height:1px;"></div>';
+  }
   return html;
 }
 
@@ -10033,6 +10047,17 @@ function bindFeedPage() {
   bindPostCardEvents();
   bindStoriesEvents();
   bindMimiPlayers();
+  var _sentinel = appEl.querySelector("[data-feed-sentinel]");
+  if (_sentinel && 'IntersectionObserver' in window) {
+    var _io = new IntersectionObserver(function(entries) {
+      if (entries[0].isIntersecting) {
+        _io.disconnect();
+        state.feedRenderLimit += 20;
+        render();
+      }
+    });
+    _io.observe(_sentinel);
+  }
 }
 
 function bindPostCardEvents() {
