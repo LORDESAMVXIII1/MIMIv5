@@ -2819,6 +2819,21 @@ function postFireCount(p) { return p.fireTotal || 0; }
 // publicação, por dia. Depois disso, precisa assinar o MIMI Plus pra
 // continuar reagindo naquela publicação no mesmo dia.
 var FIRE_DAILY_LIMIT = 5;
+// BUG: cliques rápidos no foguinho somavam certinho na tela (fireTotal
+// subindo 1 a 1, otimista), mas o polling de reações a cada 15s
+// (syncPostsReactionsFromServer) busca o total no Firestore e SOBRESCREVE
+// post.fireTotal com o que está salvo no servidor. Como as escritas de
+// cada toque são enfileiradas e levam um tempinho pra confirmar (mais
+// ainda em rajadas de toque/rede móvel), o polling podia ler o servidor
+// num instante em que a última escrita ainda não tinha terminado — e
+// "corrigia" a tela pra um número a menos do que o usuário via, dando a
+// impressão de ter perdido um toque bem na hora de fechar o aviso do
+// MIMI Plus (que força um re-render). Este contador marca quantas
+// escritas de fogo ainda estão em voo por publicação; enquanto houver
+// alguma pendente, o polling não mexe no total local daquele post — ele
+// se acerta sozinho assim que as escritas terminarem, sem nunca voltar
+// pra trás na tela do usuário.
+var _firePendingWrites = {};
 function _todayKey() { var d = new Date(); return d.getFullYear()+"-"+(d.getMonth()+1)+"-"+d.getDate(); }
 // FIX: o contador diário de toques de fogo vivia só dentro do objeto do
 // post em memória (post.fireDaily). Só que loadPosts() SUBSTITUI o array
@@ -7037,7 +7052,11 @@ function syncPostsReactionsFromServer() {
       if (!local) return; // post novo (ainda não carregado) — fica pro próximo loadPosts()
       var newFire = d.fireTotal || 0;
       var newLikedBy = d.likedBy || [];
-      if (newFire !== (local.fireTotal || 0)) { local.fireTotal = newFire; changed = true; }
+      // Se ainda tem escrita de fogo em voo pra este post, não sobrescreve:
+      // o servidor pode responder com um total desatualizado (a escrita
+      // anterior ainda não terminou de propagar) e "puxar pra trás" o
+      // número que o próprio usuário acabou de ver subir na tela.
+      if (!(_firePendingWrites[d._id] > 0) && newFire !== (local.fireTotal || 0)) { local.fireTotal = newFire; changed = true; }
       if (newLikedBy.length !== local.likedBy.length || newLikedBy.some(function(uidV){ return local.likedBy.indexOf(uidV) === -1; })) {
         local.likedBy = newLikedBy;
         changed = true;
@@ -9299,6 +9318,29 @@ function pauseAllFeedMedia() {
 document.addEventListener("visibilitychange", function() {
   if (document.hidden && state.page === "feed") pauseAllFeedMedia();
 });
+// PERF: em aparelhos com pouca RAM (2-3GB), o Chrome fica bem mais lento
+// pra fazer qualquer coisa quando, além da interação do usuário, o app
+// também está de fundo rodando vários setInterval de polling (lista de
+// conversas, notificações, stories, reações dos posts) — cada um desses
+// faz uma leitura no Firestore + mexe no DOM a cada poucos segundos,
+// mesmo com a aba em segundo plano/minimizada. Esse trabalho invisível
+// competia por CPU com qualquer toque que o usuário desse ao voltar pro
+// app, dando a sensação de app travando à toa. Agora esses pollings são
+// pausados assim que o app sai de foco e retomados só quando ele volta a
+// ficar visível (e o usuário ainda está logado).
+document.addEventListener("visibilitychange", function() {
+  if (document.hidden) {
+    stopConvoListPolling();
+    stopNotifPolling();
+    stopStoryPolling();
+    stopPostsReactionPolling();
+  } else if (_idToken && _fbUid) {
+    startConvoListPolling();
+    startNotifPolling();
+    startStoryPolling();
+    startPostsReactionPolling();
+  }
+});
 
 // ─── BIND ADVANCED VIDEO PLAYERS ────────────────────────────────
 class AdvancedVideoPlayer {
@@ -10302,8 +10344,11 @@ function bindPostCardEvents() {
   var _fireWriteChain = {};
   function queueFireWrite(pid, newTotal) {
     var prev = _fireWriteChain[pid] || Promise.resolve();
+    _firePendingWrites[pid] = (_firePendingWrites[pid] || 0) + 1;
     var next = prev.catch(function(){}).then(function(){
       return FB.firePost(pid, newTotal);
+    }).finally(function(){
+      _firePendingWrites[pid] = Math.max(0, (_firePendingWrites[pid] || 0) - 1);
     });
     _fireWriteChain[pid] = next;
     return next;
