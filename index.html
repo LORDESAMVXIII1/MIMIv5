@@ -1770,7 +1770,7 @@ var SPARKLE_FILLED = { loc:1, like:1, save:1 };
 // conforme escolhido no protótipo, pra ficar igual à foto de referência.
 var SPARKLE_STROKE_WIDTH = { comment: 1.5 };
 // Ícones que NÃO devem ter os brilhinhos decorativos ao redor
-var SPARKLE_NO_GLOW = { comment: 1 };
+var SPARKLE_NO_GLOW = { comment: 1, share: 1 };
 
 function sparkleIcon(name, size, color, active) {
   size = size || 24;
@@ -10401,20 +10401,45 @@ function bindPostCardEvents() {
       e.stopPropagation();
       var postId = btn.getAttribute("data-share-post");
       var shareUrl = window.location.origin + "?post=" + postId;
-      
-      if (navigator.clipboard && navigator.clipboard.writeText) {
+
+      function countShare() {
+        if (typeof FB !== "undefined" && FB.incrementShareCount) {
+          FB.incrementShareCount(postId).catch(function(){});
+        }
+      }
+
+      // Em celular, abre o menu nativo de compartilhamento (WhatsApp,
+      // Mensagens, etc.) em vez de só copiar o link.
+      if (navigator.share) {
+        navigator.share({ title: "MIMI", text: "Dá uma olhada nessa publicação no MIMI!", url: shareUrl })
+          .then(countShare)
+          .catch(function(err) {
+            // Usuário cancelou o menu de compartilhamento — não conta como
+            // compartilhamento e não mostra nenhum aviso.
+            if (err && err.name === "AbortError") return;
+            // Qualquer outro erro real: cai pro fallback de copiar o link.
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(shareUrl).then(function() {
+                showToast(toastWithIcon("Link copiado!", "link"), true);
+                countShare();
+              }).catch(function() { fallbackCopyToClipboard(shareUrl); countShare(); });
+            } else {
+              fallbackCopyToClipboard(shareUrl);
+              countShare();
+            }
+          });
+      } else if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(shareUrl).then(function() {
           showToast(toastWithIcon("Link copiado!", "link"), true);
+          countShare();
         }).catch(function(err) {
           console.error("Falha ao copiar:", err);
           fallbackCopyToClipboard(shareUrl);
+          countShare();
         });
       } else {
         fallbackCopyToClipboard(shareUrl);
-      }
-      
-      if (typeof FB !== "undefined" && FB.incrementShareCount) {
-        FB.incrementShareCount(postId).catch(function(){});
+        countShare();
       }
     });
   });
