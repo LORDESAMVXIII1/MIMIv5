@@ -1760,17 +1760,17 @@ var SPARKLE_ICONS = {
   like:     '<path d="'+ICONS.heart+'"/>',
   comment:  '<path d="M2.4 12a9.6 9.6 0 1 1 5.4 8.64L3.36 22.2 4.92 17.88A9.6 9.6 0 0 1 2.4 12z"/>',
   share:    '<path d="M5 19L19 5"/><path d="M11 5h8v8"/>',
-  save:     '<path d="M6 2h12a1 1 0 011 1v19l-7-4-7 4V3a1 1 0 011-1z"/>',
+  save:     '<path d="M6 4.5C6 3.67 6.67 3 7.5 3H16.5C17.33 3 18 3.67 18 4.5V20L12 16L6 20V4.5Z"/>',
   download: '<path d="'+ICONS.download+'"/>'
 };
 // paths que são "sólidos" (preenchidos) em vez de linha/contorno
-var SPARKLE_FILLED = { loc:1, like:1, save:1 };
+var SPARKLE_FILLED = { loc:1, like:1 };
 
 // Espessura de traço específica por ícone (padrão 1.8px); "comment" usa 1.5px
 // conforme escolhido no protótipo, pra ficar igual à foto de referência.
-var SPARKLE_STROKE_WIDTH = { comment: 1.5 };
+var SPARKLE_STROKE_WIDTH = { comment: 1.5, save: 1.5 };
 // Ícones que NÃO devem ter os brilhinhos decorativos ao redor
-var SPARKLE_NO_GLOW = { comment: 1, share: 1 };
+var SPARKLE_NO_GLOW = { comment: 1, share: 1, save: 1 };
 
 function sparkleIcon(name, size, color, active) {
   size = size || 24;
