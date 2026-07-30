@@ -19623,8 +19623,8 @@ var VibesModule = {
       var observer = new IntersectionObserver(function(entries) {
         entries.forEach(function(entry) {
           var idx = entry.target.getAttribute("data-vibe-idx");
-          var video = entry.target.querySelector(".vibe-video");
-          if (video) {
+          var video = entry.target.querySelector("video.vibe-video");
+          if (video && typeof video.play === "function") {
             if (entry.isIntersecting) {
               video.muted = false; // tenta tocar com som, igual ao player do Feed
               var playPromise = video.play();
@@ -19655,6 +19655,7 @@ var VibesModule = {
       var video = slideEl.querySelector(".vibe-video");
       if (!video) return;
       var idxAttr = slideEl.getAttribute("data-vibe-idx");
+      if (idxAttr === null) return; // slide de anúncio (imagem) — sem duplo toque pra curtir
       video.addEventListener("click", function() {
         var idx = parseInt(idxAttr);
         var now = Date.now();
