@@ -1697,6 +1697,7 @@ var ICONS = {
   logout:   "M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1",
   heartLogo:"M12 21s-7.5-4.7-10-9.3C.3 7.9 2.3 4 6.2 4c2.1 0 3.7 1.2 4.8 3 1.1-1.8 2.7-3 4.8-3 3.9 0 5.9 3.9 4.2 7.7C19.5 16.3 12 21 12 21z",
   video:    "M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z",
+  megaphone:"M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13.5l3-1.5v-6l-3-1.5M6.75 7.5H4.5A2.25 2.25 0 002.25 9.75v0A2.25 2.25 0 004.5 12h2.25m0-4.5v4.5m0-4.5l8.25-4.5v13.5L6.75 12",
   edit:     "M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z",
   globe:    "M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9",
   mic:      "M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3zM19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8",
@@ -2066,7 +2067,8 @@ function renderBioWithMentions(text) { return renderTextWithMentions(text); }
 // até PLUS_FEED_BOOST posições — efeito visível sem esconder quem não assina.
 var PLUS_FEED_BOOST = 3;
 function getFeedOrder(list) {
-  list = list.filter(function(p){ return !isUserBlocked(p.authorId); });
+  // Anúncios nunca aparecem no feed público — só em "Meus Anúncios".
+  list = list.filter(function(p){ return !isUserBlocked(p.authorId) && !p.isAd; });
   var scored = list.map(function(p, i) {
     var author = USERS[p.authorId];
     var isPlus = author && isSubscriptionActive(author);
@@ -2627,7 +2629,10 @@ var BOOKS_CATALOG = [
   { catId:"c14", title:"Extraordinário", author:"R. J. Palacio", color:"linear-gradient(160deg,#2f7fd6,#1c5aa6)", textColor:"#ffffff", rating:4.9, isbn:"9788580572748" },
 ];
 
-function userPosts(uidStr) { return posts.filter(function(p){ return p.authorId === uidStr; }); }
+// Anúncios (isAd:true) só entram na grade do perfil se o dono tiver ativado
+// showOnProfile NAQUELE anúncio específico (switch por anúncio). Por padrão
+// ficam fora — só visíveis em "Meus Anúncios".
+function userPosts(uidStr) { return posts.filter(function(p){ return p.authorId === uidStr && (!p.isAd || p.showOnProfile); }); }
 // Vibes publicadas por um usuário — usadas pra aparecerem no perfil dele
 // junto com os posts normais (ver profileTabItems). VibesModule.vibes já
 // guarda TODAS as vibes carregadas (não só as do usuário logado, apesar
@@ -2834,6 +2839,17 @@ var FIRE_DAILY_LIMIT = 5;
 // se acerta sozinho assim que as escritas terminarem, sem nunca voltar
 // pra trás na tela do usuário.
 var _firePendingWrites = {};
+// Maior valor de fireTotal que NÓS já escrevemos com sucesso no servidor
+// pra cada publicação. Existe porque _firePendingWrites some assim que a
+// escrita RESPONDE com sucesso, mas isso não garante que uma leitura
+// seguinte já veja esse valor (o gateway/backend pode responder "ok" antes
+// de propagar de verdade). Se o polling de 15s cair bem nesse intervalo,
+// ele lia um total desatualizado e "puxava pra trás" a tela do usuário —
+// era exatamente isso que fazia o 5º toque de fogo sumir, mostrando só 4.
+// Nunca deixamos o polling mostrar um total ABAIXO do que nós mesmos já
+// confirmamos ter escrito; só aceitamos do servidor valores iguais ou
+// maiores (reação de outra pessoa, por exemplo).
+var _fireLastWrittenTotal = {};
 function _todayKey() { var d = new Date(); return d.getFullYear()+"-"+(d.getMonth()+1)+"-"+d.getDate(); }
 // FIX: o contador diário de toques de fogo vivia só dentro do objeto do
 // post em memória (post.fireDaily). Só que loadPosts() SUBSTITUI o array
@@ -5308,6 +5324,8 @@ var FB = {
       audio:     postData.audio || null,
       audioMeta: postData.audioMeta || null,
       loc:       postData.loc   || null,
+      isAd:      !!postData.isAd,
+      showOnProfile: postData.showOnProfile !== false,
       likedBy:   [],
       fireTotal: 0,
       createdAt: now,
@@ -7056,7 +7074,7 @@ function syncPostsReactionsFromServer() {
       // o servidor pode responder com um total desatualizado (a escrita
       // anterior ainda não terminou de propagar) e "puxar pra trás" o
       // número que o próprio usuário acabou de ver subir na tela.
-      if (!(_firePendingWrites[d._id] > 0) && newFire !== (local.fireTotal || 0)) { local.fireTotal = newFire; changed = true; }
+      if (!(_firePendingWrites[d._id] > 0) && newFire !== (local.fireTotal || 0) && newFire >= (_fireLastWrittenTotal[d._id] || 0)) { local.fireTotal = newFire; changed = true; }
       if (newLikedBy.length !== local.likedBy.length || newLikedBy.some(function(uidV){ return local.likedBy.indexOf(uidV) === -1; })) {
         local.likedBy = newLikedBy;
         changed = true;
@@ -7678,6 +7696,7 @@ var state = {
   paywallDialog: null, // aviso "recurso MIMI Plus" mais elaborado que o confirmDialog genérico
   editProfileOpen: false,
   supportOpen: false,
+  myAdsOpen: false, // tela privada "Meus Anúncios"
   searchQuery: "",
   replyTarget: null,
   userSearchOpen: false,
@@ -7702,7 +7721,7 @@ var state = {
   photoViewerUrl: null, // url da foto de perfil aberta em tela cheia
 };
 
-var compose = { media:null, mediaType:null, loc:null, audioMeta:null };
+var compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:false, showOnProfile:false };
 
 // ─── BUSCA DE MÚSICA (iTunes Search API — prévias oficiais de 30s) ─────
 var musicSearch = { open:false, query:"", results:[], loading:false, error:null, seq:0 };
@@ -8239,6 +8258,7 @@ function _renderImpl() {
   if (showBottomNav) html += renderBottomNav(unreadNotifs, unreadMsgs);
 
   if (state.followListFor) html += renderFollowListPage();
+  if (state.myAdsOpen) html += renderMyAdsPage();
   if (state.publishMenu) html += renderPublishMenu();
   if (state.creating) html += renderCreatePost();
   if (musicSearch.open) html += renderMusicSearchModal();
@@ -8285,6 +8305,7 @@ function _renderImpl() {
   }
 
   if (state.followListFor) bindFollowListPage();
+  if (state.myAdsOpen) bindMyAdsPage();
   if (state.publishMenu) bindPublishMenu();
   if (state.creating) bindCreatePost();
   if (musicSearch.open) bindMusicSearchModal();
@@ -9129,7 +9150,7 @@ function closeStoryComments() {
 // "por baixo" dessas telas.
 function hasOpenOverlay() {
   return !!(
-    state.followListFor || state.publishMenu || state.creating || musicSearch.open ||
+    state.followListFor || state.myAdsOpen || state.publishMenu || state.creating || musicSearch.open ||
     state.editProfileOpen || state.supportOpen || state.subsOpen || state.viewingStoryIdx !== null ||
     activeCall || incomingCall || state.actionSheetPostId || state.profileSheetUserId ||
     state.confirmDialog || state.paywallDialog || state.addBooksSheetOpen || state.bookPicker ||
@@ -10395,12 +10416,19 @@ function bindPostCardEvents() {
       fireBurst(btn);
       setTimeout(function(){ btn.classList.remove("fire-pop"); }, 280);
 
-      queueFireWrite(pid, post.fireTotal).catch(function(err){
+      queueFireWrite(pid, post.fireTotal).then(function(){
+        // Escrita confirmada: guarda esse total como o "piso" que o
+        // polling não pode derrubar (ver comentário de _fireLastWrittenTotal).
+        _fireLastWrittenTotal[pid] = Math.max(_fireLastWrittenTotal[pid] || 0, post.fireTotal);
+      }).catch(function(err){
         // A escrita falhou de verdade (não só atraso) — desfaz o toque
         // otimista pra tela não mentir sobre o que está salvo.
         entry.count = Math.max(0, entry.count - 1);
         _persistMyFireToday(pid, entry);
         post.fireTotal = Math.max(0, (post.fireTotal || 0) - 1);
+        if ((_fireLastWrittenTotal[pid] || 0) > post.fireTotal) {
+          _fireLastWrittenTotal[pid] = post.fireTotal;
+        }
         syncReactionButtons(post);
         // TEMP DEBUG: mostra a mensagem de erro real no toast (não só
         // "tente de novo") pra dar pra diagnosticar direto pelo celular,
@@ -11252,6 +11280,7 @@ function renderSearchResults(q) {
            (u.username||"").toLowerCase().indexOf(qLower) !== -1;
   });
   var postResults = posts.filter(function(p) {
+    if (p.isAd && !p.showOnProfile) return false; // anúncio oculto não aparece na busca
     return (p.text||"").toLowerCase().indexOf(qLower) !== -1;
   });
 
@@ -15893,6 +15922,82 @@ function bindBookActionSheet() {
   });
 }
 
+// ─── MEUS ANÚNCIOS (área privada de gerenciamento de anúncios) ─
+// Anúncios (isAd:true) nunca aparecem no feed público. Só aparecem no
+// perfil se o dono ativar showOnProfile NAQUELE anúncio específico. Esta
+// tela é onde o dono vê todos os anúncios que criou e liga/desliga cada um.
+function renderMyAdsPage() {
+  var myAds = posts.filter(function(p){ return p.authorId === ME_ID && p.isAd; });
+  var html = '<div class="create-overlay fade-in" style="z-index:220;">' +
+    '<div class="create-header">' +
+      '<button class="icon-btn" data-close-my-ads style="color:var(--sub);">'+icoSvg("back",22)+'</button>' +
+      '<span style="font-weight:800;font-size:16px;">Meus Anúncios</span>' +
+      '<span style="width:22px;"></span>' +
+    '</div>' +
+    '<div class="create-body" style="padding:14px;">' +
+      '<div style="font-size:12.5px;color:var(--muted);margin-bottom:14px;line-height:1.5;">' +
+        'Anúncios não aparecem no feed nem na busca. Cada um só entra na sua grade de perfil se você ativar o botão dele.' +
+      '</div>';
+  if (!myAds.length) {
+    html += '<div class="search-empty">Você ainda não criou nenhum anúncio.</div>';
+  } else {
+    myAds.forEach(function(p) {
+      var thumb = p.img ? '<img src="'+p.img+'" style="width:56px;height:56px;border-radius:10px;object-fit:cover;flex-shrink:0;">' :
+        p.video ? '<video src="'+p.video+'" style="width:56px;height:56px;border-radius:10px;object-fit:cover;flex-shrink:0;"></video>' :
+        '<div style="width:56px;height:56px;border-radius:10px;background:var(--bg);flex-shrink:0;"></div>';
+      html += '<div class="cfg-item" style="align-items:center;margin-bottom:10px;">' +
+        thumb +
+        '<div class="grow" style="min-width:0;">' +
+          '<div class="cfg-item-label" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+(esc(p.text)||"Sem legenda")+'</div>' +
+          '<div class="cfg-item-sub">'+(p.showOnProfile?"Visível no seu perfil":"Oculto do seu perfil")+'</div>' +
+        '</div>' +
+        '<div class="cfg-switch'+(p.showOnProfile?" active":"")+'" data-toggle-my-ad="'+p.id+'" style="cursor:pointer;width:42px;height:24px;border-radius:12px;background:'+(p.showOnProfile?"#1abc9c":"var(--border)")+';position:relative;flex-shrink:0;transition:background .2s;">' +
+          '<div style="width:18px;height:18px;border-radius:50%;background:#fff;position:absolute;top:3px;left:'+(p.showOnProfile?"21px":"3px")+';transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,.2);"></div>' +
+        '</div>' +
+        '<button class="icon-btn" data-delete-my-ad="'+p.id+'" style="color:var(--muted);margin-left:6px;">'+icoSvg("close",16,"var(--muted)")+'</button>' +
+      '</div>';
+    });
+  }
+  html += '</div></div>';
+  return html;
+}
+function bindMyAdsPage() {
+  var closeBtn = appEl.querySelector("[data-close-my-ads]");
+  if (closeBtn) closeBtn.addEventListener("click", function() { state.myAdsOpen = false; render(); });
+
+  appEl.querySelectorAll("[data-toggle-my-ad]").forEach(function(sw) {
+    sw.addEventListener("click", function() {
+      var pid = sw.getAttribute("data-toggle-my-ad");
+      var post = posts.find(function(p){ return p.id === pid; });
+      if (!post) return;
+      post.showOnProfile = !post.showOnProfile;
+      render();
+      if (_idToken) fsSet("posts/"+pid, { showOnProfile: post.showOnProfile }).catch(function(err){
+        console.error("Erro ao salvar visibilidade do anúncio:", err);
+      });
+    });
+  });
+
+  appEl.querySelectorAll("[data-delete-my-ad]").forEach(function(btn) {
+    btn.addEventListener("click", function() {
+      var pid = btn.getAttribute("data-delete-my-ad");
+      state.confirmDialog = {
+        title: "Excluir anúncio?",
+        text: "Essa ação não pode ser desfeita.",
+        confirmLabel: "Excluir",
+        danger: true,
+        onConfirm: function() {
+          posts = posts.filter(function(p){ return p.id !== pid; });
+          delete postComments[pid];
+          if (_idToken) fsDelete("posts/" + pid).catch(function(){});
+          showToast("Anúncio excluído.");
+        }
+      };
+      render();
+    });
+  });
+}
+
 // ─── FOLLOW LIST (followers / following) ──────────────────────
 function renderFollowListPage() {
   var f = state.followListFor;
@@ -16323,6 +16428,14 @@ function renderPublishMenu() {
         '</div>' +
         '<span class="publish-menu-chevron">'+icoSvg("chevronRight",18,"var(--muted)")+'</span>' +
       '</button>' +
+      '<button class="publish-menu-option" data-publish-type="ad">' +
+        '<div class="publish-menu-icon" style="background:linear-gradient(135deg,#2ecc71,#1abc9c);">'+icoSvg("megaphone",22,"#fff")+'</div>' +
+        '<div class="publish-menu-text">' +
+          '<div class="publish-menu-label">Anúncio</div>' +
+          '<div class="publish-menu-desc">Imagem ou vídeo promocional — fica fora do seu perfil por padrão</div>' +
+        '</div>' +
+        '<span class="publish-menu-chevron">'+icoSvg("chevronRight",18,"var(--muted)")+'</span>' +
+      '</button>' +
       '<input type="file" id="publish-vibe-file-input" accept="video/*" class="hidden">' +
     '</div>' +
   '</div>';
@@ -16342,7 +16455,12 @@ function bindPublishMenu() {
       var type = btn.getAttribute("data-publish-type");
       if (type === "post") {
         state.publishMenu = false;
-        compose = { media:null, mediaType:null, loc:null, audioMeta:null };
+        compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:false, showOnProfile:false };
+        state.creating = true;
+        render();
+      } else if (type === "ad") {
+        state.publishMenu = false;
+        compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:true, showOnProfile:false };
         state.creating = true;
         render();
       } else if (type === "vibe") {
@@ -16608,10 +16726,23 @@ function renderCreatePost() {
     ? '<div class="create-loc-chip">'+icoSvg("loc",14,C.accent)+' '+esc(compose.loc)+'<button class="create-loc-remove" data-remove-loc>'+icoSvg("close",13,C.accent)+'</button></div>'
     : "";
 
+  var adToggle = compose.isAd
+    ? '<div class="cfg-item" data-toggle-ad-show-profile style="cursor:pointer;background:var(--bg);border-radius:12px;margin-top:10px;">' +
+        '<div class="cfg-item-icon" style="background:#e9fbf3;">'+icoSvg("user",18,"#1abc9c")+'</div>' +
+        '<div class="grow">' +
+          '<div class="cfg-item-label">Mostrar no meu perfil</div>' +
+          '<div class="cfg-item-sub">Desativado, o anúncio fica só em "Meus Anúncios"</div>' +
+        '</div>' +
+        '<div class="cfg-switch'+(compose.showOnProfile?" active":"")+'" style="width:42px;height:24px;border-radius:12px;background:'+(compose.showOnProfile?"#1abc9c":"var(--border)")+';position:relative;flex-shrink:0;transition:background .2s;">' +
+          '<div style="width:18px;height:18px;border-radius:50%;background:#fff;position:absolute;top:3px;left:'+(compose.showOnProfile?"21px":"3px")+';transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,.2);"></div>' +
+        '</div>' +
+      '</div>'
+    : "";
+
   return '<div class="create-overlay fade-in">' +
     '<div class="create-header">' +
       '<button class="icon-btn" data-close-create style="color:var(--sub);">'+icoSvg("back",22)+'</button>' +
-      '<span style="font-weight:800;font-size:16px;">Nova publicação</span>' +
+      '<span style="font-weight:800;font-size:16px;">'+(compose.isAd?"Novo anúncio":"Nova publicação")+'</span>' +
       '<button class="btn btn-sm btn-primary" data-submit-post>Publicar</button>' +
     '</div>' +
     '<div class="create-body">' +
@@ -16620,10 +16751,10 @@ function renderCreatePost() {
         '<div class="grow">' +
           '<div style="font-weight:700;font-size:14px;margin-bottom:6px;">'+esc(ME.name)+'</div>' +
           '<div class="create-textarea-wrap" style="position:relative;">' +
-            '<textarea class="create-textarea" placeholder="O que está acontecendo?" data-post-text></textarea>' +
+            '<textarea class="create-textarea" placeholder="'+(compose.isAd?"Descreva o anúncio…":"O que está acontecendo?")+'" data-post-text></textarea>' +
             '<span data-post-sparkle style="position:absolute;top:2px;right:0;pointer-events:none;opacity:.55;">'+icoSvg("sparkle",18,C.accent)+'</span>' +
           '</div>' +
-          mediaPreview + locPreview +
+          mediaPreview + locPreview + adToggle +
         '</div>' +
       '</div>' +
     '</div>' +
@@ -16756,11 +16887,23 @@ function bindCreatePost() {
   var emojiBtn = appEl.querySelector("[data-pick-emoji]");
   if (emojiBtn) emojiBtn.addEventListener("click", function() { toggleEmojiPanel("create"); });
 
+  // Toggle "Mostrar no meu perfil" (só existe na composição de Anúncio)
+  var adProfileToggle = appEl.querySelector("[data-toggle-ad-show-profile]");
+  if (adProfileToggle) adProfileToggle.addEventListener("click", function() {
+    compose.showOnProfile = !compose.showOnProfile;
+    render();
+  });
+
   if (submitBtn) {
     submitBtn.addEventListener("click", function() {
       var ta = appEl.querySelector("[data-post-text]");
       var text = ta ? ta.value.trim() : "";
       if (!text && !compose.media) return;
+      // Anúncio precisa de imagem ou vídeo — não faz sentido um anúncio só de texto.
+      if (compose.isAd && compose.mediaType !== "image" && compose.mediaType !== "video") {
+        showToast(toastWithIcon("Adicione uma imagem ou vídeo para o anúncio.", "warning", "before"), true);
+        return;
+      }
       var newPost = {
         id:"p_"+uid(), authorId:ME_ID, text:text,
         img: compose.mediaType === "image" ? compose.media : null,
@@ -16768,24 +16911,34 @@ function bindCreatePost() {
         audio: compose.mediaType === "audio" ? compose.media : null,
         audioMeta: compose.mediaType === "audio" ? compose.audioMeta : null,
         loc: compose.loc,
+        isAd: !!compose.isAd,
+        showOnProfile: compose.isAd ? !!compose.showOnProfile : true,
         likedBy:[], saved:false, time:"agora",
       };
       posts.unshift(newPost);
       FB.createPost(newPost);
+      var wasAd = compose.isAd;
       state.creating = false;
-      state.page = "feed";
       state.viewProfileId = null;
       state.profileStack.length = 0;
       state.postDetailId = null;
-      compose = { media:null, mediaType:null, loc:null, audioMeta:null };
-      render();
-      window.scrollTo(0,0);
-      showToast(toastWithIcon("Publicado!", "success"), true);
+      compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:false, showOnProfile:false };
+      if (wasAd) {
+        // Anúncio não aparece no feed — leva pra "Meus Anúncios" pra confirmar que foi publicado.
+        state.myAdsOpen = true;
+        render();
+        showToast(toastWithIcon("Anúncio publicado! Ele fica fora do seu perfil até você ativar.", "success"), true);
+      } else {
+        state.page = "feed";
+        render();
+        window.scrollTo(0,0);
+        showToast(toastWithIcon("Publicado!", "success"), true);
+      }
     });
   }
   if (closeBtn) closeBtn.addEventListener("click", function() {
     state.creating = false;
-    compose = { media:null, mediaType:null, loc:null, audioMeta:null };
+    compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:false, showOnProfile:false };
     render();
   });
 }
@@ -16852,6 +17005,17 @@ function renderSettingsPage() {
         '<button class="btn btn-sm" data-follower-override-save>Salvar</button>' +
       '</div>' +
     '</div>' +
+  '</div>' +
+
+  // Ferramentas
+  '<div class="cfg-section-title">Ferramentas</div>' +
+  '<div class="cfg-item" data-open-my-ads style="cursor:pointer;">' +
+    '<div class="cfg-item-icon" style="background:#e9fbf3;">'+icoSvg("megaphone",20,"#1abc9c")+'</div>' +
+    '<div class="grow">' +
+      '<div class="cfg-item-label">Meus Anúncios</div>' +
+      '<div class="cfg-item-sub">Gerencie os anúncios que você publicou e sua visibilidade no perfil</div>' +
+    '</div>' +
+    icoSvg("share",16,"var(--muted)") +
   '</div>' +
 
   // Suporte
@@ -16927,6 +17091,12 @@ function bindSettingsPage() {
   var openSupportBtn = appEl.querySelector("[data-open-support]");
   if (openSupportBtn) openSupportBtn.addEventListener("click", function() {
     state.supportOpen = true;
+    render();
+  });
+
+  var openMyAdsBtn = appEl.querySelector("[data-open-my-ads]");
+  if (openMyAdsBtn) openMyAdsBtn.addEventListener("click", function() {
+    state.myAdsOpen = true;
     render();
   });
 
