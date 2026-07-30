@@ -2074,8 +2074,20 @@ function isAppOwner(u) {
 }
 function adPlacesOf(p) {
   var d = (p && p.adPlaces) || null;
-  if (!d) return { feed:true, profile:true, search:true, banner:false };
-  return { feed: d.feed !== false, profile: d.profile !== false, search: d.search !== false, banner: !!d.banner };
+  if (!d) return { feed:true, profile:true, search:true, banner:false, stories:false, vibes:false };
+  return { feed: d.feed !== false, profile: d.profile !== false, search: d.search !== false, banner: !!d.banner, stories: !!d.stories, vibes: !!d.vibes };
+}
+
+// Selo "Anúncio" reutilizado em Feed, Stories, Vibes e Banner.
+function adBadgeHtml(marginTop) {
+  return '<div style="display:inline-flex;align-items:center;gap:3px;margin-top:'+(marginTop||2)+'px;padding:1px 7px;border-radius:20px;background:#e9fbf3;color:#1abc9c;font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;">'+icoSvg("megaphone",10,"#1abc9c",true)+' Anúncio</div>';
+}
+// Anúncios que devem aparecer nos Stories / nas Vibes.
+function adsForPlace(where) {
+  if (typeof posts === "undefined") return [];
+  return posts.filter(function(p) {
+    return p.isAd && p.adVisible && adPlacesOf(p)[where] && (p.img || p.video);
+  });
 }
 function adShowsIn(p, where) {
   if (!p || !p.isAd) return true;
@@ -7740,7 +7752,7 @@ var state = {
   photoViewerUrl: null, // url da foto de perfil aberta em tela cheia
 };
 
-var compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:false, adVisible:false, adPlaces:{ feed:true, profile:true, search:true, banner:false } };
+var compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:false, adVisible:false, adPlaces:{ feed:true, profile:true, search:true, banner:false, stories:false, vibes:false } };
 
 // ─── BUSCA DE MÚSICA (iTunes Search API — prévias oficiais de 30s) ─────
 var musicSearch = { open:false, query:"", results:[], loading:false, error:null, seq:0 };
@@ -8593,6 +8605,11 @@ function allStoriesList() {
     }
     list.push({ ownerId:s.ownerId, own:false, seenCount:s.seenCount });
   });
+  // Anúncios marcados para "Stories" entram na barra como um story normal,
+  // com o selo "Anúncio" embaixo do nome de usuário.
+  adsForPlace("stories").forEach(function(ad) {
+    list.push({ ownerId: ad.authorId, own:false, isAd:true, ad: ad, seenCount:0 });
+  });
   return list;
 }
 
@@ -8601,6 +8618,16 @@ function renderStories() {
   var html = '<div class="stories-wrap">';
   list.forEach(function(s, idx) {
     var u = USERS[s.ownerId] || { name: "Usuário", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed="+s.ownerId };
+    if (s.isAd) {
+      html += '<div class="story" data-story-ring="'+idx+'">' +
+        '<div class="story-ring unseen"><div class="story-ring-inner">' +
+          avatarHtml((s.ad.img || u.avatar), 56, false, false, false, null, null, null) +
+        '</div></div>' +
+        '<span class="story-name">'+esc(u.name || "MIMI")+'</span>' +
+        '<span style="display:block;text-align:center;">'+adBadgeHtml(1)+'</span>' +
+      '</div>';
+      return;
+    }
     var entry = STORIES.find(function(x){ return x.ownerId === s.ownerId; });
     var totalItems = entry ? entry.items.length : 0;
     var fullySeen = entry ? entry.seenCount >= totalItems && totalItems > 0 : false;
@@ -8704,6 +8731,13 @@ function currentStoryOwnerEntry() {
   var list = allStoriesList();
   var entryMeta = list[state.viewingStoryIdx];
   if (!entryMeta) return null;
+  if (entryMeta.isAd && entryMeta.ad) {
+    var ad = entryMeta.ad;
+    return {
+      ownerId: ad.authorId, isAd: true, ad: ad, seenCount: 0,
+      items: [{ id: ad.id, type: ad.video ? "video" : "image", src: ad.video || ad.img, time: ad.time || "", likes: [], comments: [] }]
+    };
+  }
   var entry = STORIES.find(function(x){ return x.ownerId === entryMeta.ownerId; });
   return entry || null;
 }
@@ -8714,10 +8748,13 @@ function renderStoryViewer() {
   var u = USERS[entry.ownerId] || { name: "Usuário", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed="+entry.ownerId };
   var itemIdx = Math.min(state.viewingStoryItemIdx, entry.items.length-1);
   var item = entry.items[itemIdx];
-  var isOwn = entry.ownerId === ME_ID;
+  var isAdStory = !!entry.isAd;
+  var isOwn = !isAdStory && entry.ownerId === ME_ID;
 
   // Registrar visualização de story (se não for do próprio usuário)
-  if (!isOwn) {
+  if (isAdStory) {
+    // anúncio: nada de views/curtidas
+  } else if (!isOwn) {
     FB.recordStoryView(entry.ownerId, item.id).catch(function(){});
   } else if (typeof FB !== "undefined" && FB.getStoryViewers && !(item.id in state.storyViewsCache)) {
     // Busca quem viu esse story (só precisa acontecer uma vez por item —
@@ -8756,7 +8793,11 @@ function renderStoryViewer() {
   var liked = item.likes.indexOf(ME_ID) !== -1;
   var viewers = state.storyViewsCache[item.id];
   var viewLabel = viewers == null ? "…" : String(viewers.length);
-  var footer = isOwn
+  var footer = isAdStory
+    ? '<div class="story-reply-row" style="justify-content:center;">' +
+        '<button class="btn btn-sm btn-primary" data-open-app-ad="'+esc(entry.ad.id)+'">Saiba mais</button>' +
+      '</div>'
+    : isOwn
     ? '<div class="story-reply-row" style="justify-content:space-around;gap:0;">' +
         '<button class="story-action-btn" data-view-story-activity="views">' + icoSvg("eye",24,"#fff") +
           '<span class="story-action-count">'+viewLabel+' visualizações</span></button>' +
@@ -8776,7 +8817,10 @@ function renderStoryViewer() {
     '<div class="story-segments">'+segments+'</div>' +
     '<div class="story-viewer-head">' +
       avatarHtml(u.avatar, 34, false, false, false, null, null, getUserFrame(u)) +
-      '<span style="color:#fff;font-weight:700;font-size:13px;flex:1;">'+esc(isOwn?"Você":u.name)+' <span style="opacity:.7;font-weight:500;">· '+esc(item.time)+'</span></span>' +
+      '<div style="flex:1;min-width:0;">' +
+        '<div style="color:#fff;font-weight:700;font-size:13px;">'+esc(isOwn?"Você":u.name)+' <span style="opacity:.7;font-weight:500;">· '+esc(item.time)+'</span></div>' +
+        (isAdStory ? adBadgeHtml(2) : "") +
+      '</div>' +
       '<button class="icon-btn" data-close-story style="color:#fff;">'+icoSvg("close",22)+'</button>' +
     '</div>' +
     '<div class="story-viewer-media" data-story-tap>'+mediaHtml+'</div>' +
@@ -11429,6 +11473,13 @@ function bindNotifsPage() {
 // Nunca cobre conteúdo, nunca abre sozinho e some pra quem tem o plano
 // com "Sem anúncios".
 var _dismissedAppAds = {};
+// O banner volta a aparecer toda vez que o usuário sai da aba de conversas.
+var _lastAdPage = null;
+function adPageWatch() {
+  var cur = (typeof state !== "undefined" && state) ? state.page : null;
+  if (_lastAdPage === "msgs" && cur !== "msgs") _dismissedAppAds = {};
+  _lastAdPage = cur;
+}
 function appBannerAds() {
   return posts.filter(function(p) {
     return p.isAd && p.adVisible && adPlacesOf(p).banner &&
@@ -11444,15 +11495,15 @@ function renderAppAdBanner(slot) {
   var thumb = ad.img
     ? '<img src="'+ad.img+'" alt="" style="width:52px;height:52px;border-radius:12px;object-fit:cover;flex-shrink:0;">'
     : '<div style="width:52px;height:52px;border-radius:12px;background:#e9fbf3;display:flex;align-items:center;justify-content:center;flex-shrink:0;">'+icoSvg("megaphone",22,"#1abc9c")+'</div>';
-  return '<div class="app-ad-banner" data-ad-slot="'+esc(slot||"")+'" style="margin:14px 16px 18px;padding:10px;border:1px solid var(--border);border-radius:16px;background:var(--surface);display:flex;gap:10px;align-items:center;">' +
-      '<div style="display:flex;gap:10px;align-items:center;flex:1;min-width:0;cursor:pointer;" data-open-app-ad="'+ad.id+'">' +
-        thumb +
-        '<div style="min-width:0;">' +
-          '<div style="display:inline-flex;align-items:center;gap:3px;padding:1px 7px;border-radius:20px;background:#e9fbf3;color:#1abc9c;font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;">'+icoSvg("megaphone",10,"#1abc9c",true)+' Anúncio</div>' +
-          '<div style="font-size:13px;font-weight:700;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(ad.text || "Conheça")+'</div>' +
-        '</div>' +
-      '</div>' +
-      '<button class="icon-btn" data-close-app-ad="'+ad.id+'" title="Ocultar" style="color:var(--muted);flex-shrink:0;">'+icoSvg("close",16,"var(--muted)")+'</button>' +
+  var media = ad.video
+    ? '<video src="'+ad.video+'" playsinline muted loop autoplay style="display:block;width:100%;height:auto;max-height:190px;object-fit:cover;"></video>'
+    : (ad.img
+        ? '<img src="'+ad.img+'" alt="" style="display:block;width:100%;height:auto;max-height:190px;object-fit:cover;">'
+        : '<div style="height:120px;background:#e9fbf3;display:flex;align-items:center;justify-content:center;">'+icoSvg("megaphone",26,"#1abc9c")+'</div>');
+  return '<div class="app-ad-banner" data-ad-slot="'+esc(slot||"")+'" style="position:relative;margin:14px 0 0;width:100%;overflow:hidden;background:var(--surface);">' +
+      '<div style="cursor:pointer;" data-open-app-ad="'+ad.id+'">' + media + '</div>' +
+      '<div style="position:absolute;top:8px;left:8px;">'+adBadgeHtml(0)+'</div>' +
+      '<button class="icon-btn" data-close-app-ad="'+ad.id+'" title="Ocultar" style="position:absolute;top:6px;right:6px;color:#fff;background:rgba(0,0,0,.35);border-radius:50%;width:26px;height:26px;display:flex;align-items:center;justify-content:center;">'+icoSvg("close",14,"#fff")+'</button>' +
     '</div>';
 }
 // Liga os cliques do banner em qualquer tela, depois de cada render.
@@ -16027,6 +16078,8 @@ function renderMyAdsPage() {
             if (pl.feed) names.push("Feed");
             if (pl.profile) names.push("Perfil");
             if (pl.search) names.push("Busca");
+            if (pl.stories) names.push("Stories");
+            if (pl.vibes) names.push("Vibes");
             if (pl.banner) names.push("Banner do app");
             return names.length ? ("Visível em: " + names.join(", ")) : "Nenhum local selecionado";
           })() : "Oculto de tudo")+'</div>' +
@@ -16535,12 +16588,12 @@ function bindPublishMenu() {
       var type = btn.getAttribute("data-publish-type");
       if (type === "post") {
         state.publishMenu = false;
-        compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:false, adVisible:false, adPlaces:{ feed:true, profile:true, search:true, banner:false } };
+        compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:false, adVisible:false, adPlaces:{ feed:true, profile:true, search:true, banner:false, stories:false, vibes:false } };
         state.creating = true;
         render();
       } else if (type === "ad") {
         state.publishMenu = false;
-        compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:true, adVisible:true, adPlaces:{ feed:true, profile:true, search:true, banner:false } };
+        compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:true, adVisible:true, adPlaces:{ feed:true, profile:true, search:true, banner:false, stories:false, vibes:false } };
         state.creating = true;
         render();
       } else if (type === "vibe") {
@@ -16828,6 +16881,8 @@ function renderCreatePost() {
         adPlaceRow("feed", "Feed", "No meio das publicações, com o selo \"Anúncio\"") +
         adPlaceRow("profile", "Meu perfil", "Na grade de publicações do seu perfil") +
         adPlaceRow("search", "Busca", "Aparece nos resultados de pesquisa") +
+        adPlaceRow("stories", "Stories", "Entra na barra de stories, com o selo \"Anúncio\"") +
+        adPlaceRow("vibes", "Vibes", "Aparece entre os vídeos, sem fogo nem download") +
         (isAppOwner() ? adPlaceRow("banner", "Banner do app (só dono)", "Faixa discreta em Mensagens, Notificações e Explorar") : "") +
       '</div>'
     : "";
@@ -17011,6 +17066,8 @@ function bindCreatePost() {
           feed: !!compose.adPlaces.feed,
           profile: !!compose.adPlaces.profile,
           search: !!compose.adPlaces.search,
+          stories: !!compose.adPlaces.stories,
+          vibes: !!compose.adPlaces.vibes,
           banner: isAppOwner() ? !!compose.adPlaces.banner : false
         } : null,
         likedBy:[], saved:false, time:"agora",
@@ -17022,7 +17079,7 @@ function bindCreatePost() {
       state.viewProfileId = null;
       state.profileStack.length = 0;
       state.postDetailId = null;
-      compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:false, adVisible:false, adPlaces:{ feed:true, profile:true, search:true, banner:false } };
+      compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:false, adVisible:false, adPlaces:{ feed:true, profile:true, search:true, banner:false, stories:false, vibes:false } };
       state.page = "feed";
       render();
       window.scrollTo(0,0);
@@ -17031,7 +17088,7 @@ function bindCreatePost() {
   }
   if (closeBtn) closeBtn.addEventListener("click", function() {
     state.creating = false;
-    compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:false, adVisible:false, adPlaces:{ feed:true, profile:true, search:true, banner:false } };
+    compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:false, adVisible:false, adPlaces:{ feed:true, profile:true, search:true, banner:false, stories:false, vibes:false } };
     render();
   });
 }
@@ -19205,15 +19262,48 @@ var VibesModule = {
     }).catch(function(){});
   },
 
+  // Anúncio renderizado como um slide de Vibe (sem fogo e sem download).
+  renderAdSlide: function(ad) {
+    var au = USERS[ad.authorId] || { name:"MIMI", avatar:"https://api.dicebear.com/7.x/avataaars/svg?seed="+ad.authorId };
+    var media = ad.video
+      ? '<video class="vibe-video" src="'+ad.video+'" playsinline webkit-playsinline loop muted autoplay preload="auto"></video>'
+      : '<img class="vibe-video" src="'+ad.img+'" alt="" style="object-fit:cover;">';
+    return '<div class="vibe-slide vibe-slide-ad">' +
+      media +
+      '<div class="vibe-info">' +
+        '<div class="who" data-open-author="'+(ad.authorId||"")+'" style="cursor:pointer;align-items:flex-start;">' +
+          avatarHtml(au.avatar, 34, false, false, false, null, null, getUserFrame(au)) +
+          '<div>' +
+            '<div class="uname">'+esc(au.name || "MIMI")+'</div>' +
+            adBadgeHtml(2) +
+          '</div>' +
+        '</div>' +
+        '<div class="cap">'+esc(ad.text || "")+'</div>' +
+      '</div>' +
+      '<div class="vibe-side">' +
+        '<button class="vibe-like-btn" data-ad-vibe-like="'+ad.id+'">' +
+          '<span class="heart-icon">'+sparkleIcon("like",32,"#fff")+'</span>' +
+        '</button>' +
+        '<button class="vibe-comment-btn" data-ad-vibe-open="'+ad.id+'">' +
+          sparkleIcon("comment",30,"#fff") +
+        '</button>' +
+        '<button class="vibe-share-btn" data-ad-vibe-open="'+ad.id+'">'+sparkleIcon("share",30,"#fff")+'</button>' +
+        '<button class="vibe-save-btn" data-ad-vibe-open="'+ad.id+'">'+sparkleIcon("save",30,"#fff")+'</button>' +
+      '</div>' +
+    '</div>';
+  },
+
   renderPage: function() {
+    var self = this;
+    var adSlides = adsForPlace("vibes");
     var html = '<div class="vibes-page">';
     
-    if (this.vibes.length === 0 && this._loading) {
+    if (this.vibes.length === 0 && adSlides.length === 0 && this._loading) {
       html += '<div style="display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;color:#fff;padding:20px;">' +
         '<div style="margin-bottom:20px;">'+icoSvg("sparkle",44,"var(--accentL,#ffb3d1)",true)+'</div>' +
         '<h2>Carregando vibes…</h2>' +
         '</div>';
-    } else if (this.vibes.length === 0) {
+    } else if (this.vibes.length === 0 && adSlides.length === 0) {
       html += '<div style="display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;color:#fff;padding:20px;">' +
         '<div style="margin-bottom:20px;">'+icoSvg("sparkle",44,"var(--accentL,#ffb3d1)",true)+'</div>' +
         '<h2>Nenhuma Vibe ainda</h2>' +
@@ -19221,7 +19311,13 @@ var VibesModule = {
         '</div>';
     } else {
       html += '<div class="vibes-feed-scroll">';
+      var _adCursor = 0;
       this.vibes.forEach(function(vibe, idx) {
+        // um anúncio a cada 3 vibes
+        if (idx > 0 && idx % 3 === 0 && adSlides.length) {
+          html += self.renderAdSlide(adSlides[_adCursor % adSlides.length]);
+          _adCursor++;
+        }
         var vUser = USERS[vibe.userId];
         if (!vUser && vibe.userId) self.fetchMissingUser(vibe.userId);
         var vAvatar = (vUser && vUser.avatar) || vibe.avatar || ("https://api.dicebear.com/7.x/avataaars/svg?seed=" + (vibe.userId || vibe.username));
@@ -19265,6 +19361,9 @@ var VibesModule = {
           '</div>' +
           '</div>';
       });
+      if (adSlides.length && (this.vibes.length === 0 || _adCursor === 0)) {
+        html += self.renderAdSlide(adSlides[0]);
+      }
       html += '</div>';
     }
     
@@ -19439,6 +19538,22 @@ var VibesModule = {
             console.error("Erro ao carregar comentários da vibe:", err);
           });
         }
+      });
+    });
+
+    // Anúncios dentro das Vibes: curtida só visual e demais botões abrem o anúncio.
+    appEl.querySelectorAll("[data-ad-vibe-like]").forEach(function(btn) {
+      btn.addEventListener("click", function(e) {
+        e.stopPropagation();
+        var on = btn.classList.toggle("ad-liked");
+        var heartEl = btn.querySelector(".heart-icon");
+        if (heartEl) heartEl.innerHTML = sparkleIcon("like", 32, on ? "#ff4d6d" : "#fff");
+      });
+    });
+    appEl.querySelectorAll("[data-ad-vibe-open]").forEach(function(btn) {
+      btn.addEventListener("click", function(e) {
+        e.stopPropagation();
+        openPostDetail(btn.getAttribute("data-ad-vibe-open"));
       });
     });
 
@@ -19650,6 +19765,7 @@ render = function() {
     if (_scrollEl) _vibesScrollTop = _scrollEl.scrollTop;
   }
   _originalRender.apply(this, arguments);
+  if (typeof adPageWatch === "function") adPageWatch();
   if (state.page === "vibes") {
     if (_vibesScrollTop !== null && _vibesScrollTop > 0) {
       var newScrollEl = document.querySelector(".vibes-feed-scroll");
