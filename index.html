@@ -10093,7 +10093,6 @@ function renderPostCard(post, opts) {
         '<div class="row" style="gap:4px;">' +
           '<span class="post-name">'+esc(author.name)+'</span>' +
           (author.verified ? '<span style="margin-left:2px;">'+userVerifiedBadge(author,17)+'</span>' : "") +
-          (post.isAd ? '<span style="display:inline-flex;align-items:center;gap:3px;margin-left:6px;padding:2px 8px;border-radius:20px;background:#e9fbf3;color:#1abc9c;font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;">'+icoSvg("megaphone",11,"#1abc9c",true)+' Anunciado</span>' : "") +
         '</div>' +
         '<div class="post-meta">' +
           '<span class="post-sub">'+esc(author.username)+'</span>' +
@@ -10103,17 +10102,18 @@ function renderPostCard(post, opts) {
       '</div>' +
       '<button class="icon-btn" data-open-sheet="'+post.id+'" style="color:var(--muted);">'+icoSvg("more",20)+'</button>' +
     '</div>' +
+    (post.isAd ? '<div class="post-ad-label" style="display:inline-flex;align-items:center;gap:3px;margin:2px 0 6px;padding:2px 8px;border-radius:20px;background:#e9fbf3;color:#1abc9c;font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;">'+icoSvg("megaphone",11,"#1abc9c",true)+' Anúncio</div>' : "") +
     '<p class="post-text" '+(opts.noOpenText?"":'data-open-post="'+post.id+'" style="cursor:pointer;"')+'>'+esc(post.text)+'</p>' +
     locHtml +
     mediaHtml +
     '<div class="post-actions">' +
       '<button class="act-btn '+(liked?"liked":"")+'" data-like="'+post.id+'">'+cuteFaceSvg(24,liked?C.pink:"var(--sub)",liked)+' <span data-like-count="'+post.id+'">'+fmtNum(postLikeCount(post))+'</span></button>' +
-      '<button class="act-btn '+(fired?"fired":"")+'" data-fire="'+post.id+'">'+fireSvg(24,"var(--sub)",fired)+' <span data-fire-count="'+post.id+'">'+fmtNum(postFireCount(post))+'</span></button>' +
+      (post.isAd ? "" : '<button class="act-btn '+(fired?"fired":"")+'" data-fire="'+post.id+'">'+fireSvg(24,"var(--sub)",fired)+' <span data-fire-count="'+post.id+'">'+fmtNum(postFireCount(post))+'</span></button>') +
       '<button class="act-btn" data-toggle-comments="'+post.id+'">'+sparkleIcon("comment",30,"var(--sub)")+' '+fmtNum(commentCount)+'</button>' +
       '<button class="act-btn" data-share-post="'+post.id+'">'+sparkleIcon("share",30,"var(--sub)")+' '+fmtNum(postShareCount(post))+'</button>' +
       ((post.img || post.video || post.audio) ?
         '<div style="margin-left:auto;display:flex;align-items:center;gap:14px;">' +
-          ((post.img || post.video) ?
+          ((post.img || post.video) && !post.isAd ?
             '<button class="act-btn" data-download-post="'+post.id+'" title="Baixar">'+icoSvg("download",22,"var(--sub)")+'</button>'
             : "") +
           '<button class="act-btn '+(post.saved?"saved":"")+'" data-save="'+post.id+'">'+sparkleIcon("save",30,post.saved?C.accent:"var(--sub)",post.saved)+'</button>' +
@@ -15938,7 +15938,7 @@ function renderMyAdsPage() {
     '</div>' +
     '<div class="create-body" style="padding:14px;">' +
       '<div style="font-size:12.5px;color:var(--muted);margin-bottom:14px;line-height:1.5;">' +
-        'Cada anúncio tem um único botão: ligado, ele aparece no Feed (com o selo "Anunciado"), no seu perfil e na busca. Desligado, some de todos os lugares.' +
+        'Cada anúncio tem um único botão: ligado, ele aparece no Feed (com o selo "Anúncio"), no seu perfil e na busca. Desligado, some de todos os lugares.' +
       '</div>';
   if (!myAds.length) {
     html += '<div class="search-empty">Você ainda não criou nenhum anúncio.</div>';
@@ -16434,7 +16434,7 @@ function renderPublishMenu() {
         '<div class="publish-menu-icon" style="background:linear-gradient(135deg,#2ecc71,#1abc9c);">'+icoSvg("megaphone",22,"#fff")+'</div>' +
         '<div class="publish-menu-text">' +
           '<div class="publish-menu-label">Anúncio</div>' +
-          '<div class="publish-menu-desc">Imagem ou vídeo promocional — marcado com selo "Anunciado"</div>' +
+          '<div class="publish-menu-desc">Imagem ou vídeo promocional — marcado com selo "Anúncio"</div>' +
         '</div>' +
         '<span class="publish-menu-chevron">'+icoSvg("chevronRight",18,"var(--muted)")+'</span>' +
       '</button>' +
@@ -16732,7 +16732,7 @@ function renderCreatePost() {
     ? '<div style="display:flex;gap:10px;align-items:flex-start;background:var(--bg);border-radius:12px;padding:12px;margin-top:10px;">' +
         icoSvg("megaphone",18,"#1abc9c") +
         '<div style="font-size:12.5px;color:var(--muted);line-height:1.5;">' +
-          'Ao publicar, o anúncio fica visível no Feed (com o selo "Anunciado"), no seu perfil e na busca — como uma publicação normal. Você pode ocultá-lo depois em Configurações → Meus Anúncios.' +
+          'Ao publicar, o anúncio fica visível no Feed (com o selo "Anúncio"), no seu perfil e na busca — como uma publicação normal. Você pode ocultá-lo depois em Configurações → Meus Anúncios.' +
         '</div>' +
       '</div>'
     : "";
@@ -16759,9 +16759,9 @@ function renderCreatePost() {
     '<div class="create-toolbar">' +
       '<button class="create-tool-btn" data-pick-media="image" title="Foto">'+icoSvg("img",22,C.accent)+'</button>' +
       '<button class="create-tool-btn" data-pick-media="video" title="Vídeo">'+icoSvg("video",22,C.accent)+'</button>' +
-      '<button class="create-tool-btn" data-pick-media="audio" title="Áudio">'+icoSvg("music",22,C.accent)+'</button>' +
+      (compose.isAd ? "" : '<button class="create-tool-btn" data-pick-media="audio" title="Áudio">'+icoSvg("music",22,C.accent)+'</button>') +
       '<button class="create-tool-btn" data-pick-emoji title="Emoji">'+icoSvg("emoji",22,C.accent)+'</button>' +
-      '<button class="create-tool-btn" data-pick-loc title="Local">'+icoSvg("loc",22,C.accent)+'</button>' +
+      (compose.isAd ? "" : '<button class="create-tool-btn" data-pick-loc title="Local">'+icoSvg("loc",22,C.accent)+'</button>') +
       '<input type="file" data-create-file-input class="hidden">' +
       '<span class="char-count" data-char-count>280</span>' +
     '</div>' +
