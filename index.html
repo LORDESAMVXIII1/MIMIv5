@@ -2067,8 +2067,9 @@ function renderBioWithMentions(text) { return renderTextWithMentions(text); }
 // até PLUS_FEED_BOOST posições — efeito visível sem esconder quem não assina.
 var PLUS_FEED_BOOST = 3;
 function getFeedOrder(list) {
-  // Anúncios nunca aparecem no feed público — só em "Meus Anúncios".
-  list = list.filter(function(p){ return !isUserBlocked(p.authorId) && !p.isAd; });
+  // Anúncio só entra no feed se estiver marcado como visível (adVisible) —
+  // é o mesmo switch único que controla Feed + Perfil + Busca ao mesmo tempo.
+  list = list.filter(function(p){ return !isUserBlocked(p.authorId) && (!p.isAd || p.adVisible); });
   var scored = list.map(function(p, i) {
     var author = USERS[p.authorId];
     var isPlus = author && isSubscriptionActive(author);
@@ -2630,9 +2631,9 @@ var BOOKS_CATALOG = [
 ];
 
 // Anúncios (isAd:true) só entram na grade do perfil se o dono tiver ativado
-// showOnProfile NAQUELE anúncio específico (switch por anúncio). Por padrão
-// ficam fora — só visíveis em "Meus Anúncios".
-function userPosts(uidStr) { return posts.filter(function(p){ return p.authorId === uidStr && (!p.isAd || p.showOnProfile); }); }
+// o switch único do anúncio (adVisible) — o mesmo botão que controla Feed,
+// Perfil e Busca ao mesmo tempo. Por padrão, ao publicar, já vem ligado.
+function userPosts(uidStr) { return posts.filter(function(p){ return p.authorId === uidStr && (!p.isAd || p.adVisible); }); }
 // Vibes publicadas por um usuário — usadas pra aparecerem no perfil dele
 // junto com os posts normais (ver profileTabItems). VibesModule.vibes já
 // guarda TODAS as vibes carregadas (não só as do usuário logado, apesar
@@ -5325,7 +5326,7 @@ var FB = {
       audioMeta: postData.audioMeta || null,
       loc:       postData.loc   || null,
       isAd:      !!postData.isAd,
-      showOnProfile: postData.showOnProfile !== false,
+      adVisible: postData.adVisible !== false,
       likedBy:   [],
       fireTotal: 0,
       createdAt: now,
@@ -7721,7 +7722,7 @@ var state = {
   photoViewerUrl: null, // url da foto de perfil aberta em tela cheia
 };
 
-var compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:false, showOnProfile:false };
+var compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:false, adVisible:false };
 
 // ─── BUSCA DE MÚSICA (iTunes Search API — prévias oficiais de 30s) ─────
 var musicSearch = { open:false, query:"", results:[], loading:false, error:null, seq:0 };
@@ -10092,6 +10093,7 @@ function renderPostCard(post, opts) {
         '<div class="row" style="gap:4px;">' +
           '<span class="post-name">'+esc(author.name)+'</span>' +
           (author.verified ? '<span style="margin-left:2px;">'+userVerifiedBadge(author,17)+'</span>' : "") +
+          (post.isAd ? '<span style="display:inline-flex;align-items:center;gap:3px;margin-left:6px;padding:2px 8px;border-radius:20px;background:#e9fbf3;color:#1abc9c;font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;">'+icoSvg("megaphone",11,"#1abc9c",true)+' Anunciado</span>' : "") +
         '</div>' +
         '<div class="post-meta">' +
           '<span class="post-sub">'+esc(author.username)+'</span>' +
@@ -11280,7 +11282,7 @@ function renderSearchResults(q) {
            (u.username||"").toLowerCase().indexOf(qLower) !== -1;
   });
   var postResults = posts.filter(function(p) {
-    if (p.isAd && !p.showOnProfile) return false; // anúncio oculto não aparece na busca
+    if (p.isAd && !p.adVisible) return false; // anúncio oculto não aparece na busca
     return (p.text||"").toLowerCase().indexOf(qLower) !== -1;
   });
 
@@ -15923,9 +15925,9 @@ function bindBookActionSheet() {
 }
 
 // ─── MEUS ANÚNCIOS (área privada de gerenciamento de anúncios) ─
-// Anúncios (isAd:true) nunca aparecem no feed público. Só aparecem no
-// perfil se o dono ativar showOnProfile NAQUELE anúncio específico. Esta
-// tela é onde o dono vê todos os anúncios que criou e liga/desliga cada um.
+// Anúncios (isAd:true) têm um único switch (adVisible) que liga/desliga a
+// visibilidade em tudo de uma vez: Feed, Perfil e Busca. Esta tela é onde
+// o dono vê todos os anúncios que criou e liga/desliga cada um.
 function renderMyAdsPage() {
   var myAds = posts.filter(function(p){ return p.authorId === ME_ID && p.isAd; });
   var html = '<div class="create-overlay fade-in" style="z-index:220;">' +
@@ -15936,7 +15938,7 @@ function renderMyAdsPage() {
     '</div>' +
     '<div class="create-body" style="padding:14px;">' +
       '<div style="font-size:12.5px;color:var(--muted);margin-bottom:14px;line-height:1.5;">' +
-        'Anúncios não aparecem no feed nem na busca. Cada um só entra na sua grade de perfil se você ativar o botão dele.' +
+        'Cada anúncio tem um único botão: ligado, ele aparece no Feed (com o selo "Anunciado"), no seu perfil e na busca. Desligado, some de todos os lugares.' +
       '</div>';
   if (!myAds.length) {
     html += '<div class="search-empty">Você ainda não criou nenhum anúncio.</div>';
@@ -15949,10 +15951,10 @@ function renderMyAdsPage() {
         thumb +
         '<div class="grow" style="min-width:0;">' +
           '<div class="cfg-item-label" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+(esc(p.text)||"Sem legenda")+'</div>' +
-          '<div class="cfg-item-sub">'+(p.showOnProfile?"Visível no seu perfil":"Oculto do seu perfil")+'</div>' +
+          '<div class="cfg-item-sub">'+(p.adVisible?"Visível (Feed, Perfil e Busca)":"Oculto de tudo")+'</div>' +
         '</div>' +
-        '<div class="cfg-switch'+(p.showOnProfile?" active":"")+'" data-toggle-my-ad="'+p.id+'" style="cursor:pointer;width:42px;height:24px;border-radius:12px;background:'+(p.showOnProfile?"#1abc9c":"var(--border)")+';position:relative;flex-shrink:0;transition:background .2s;">' +
-          '<div style="width:18px;height:18px;border-radius:50%;background:#fff;position:absolute;top:3px;left:'+(p.showOnProfile?"21px":"3px")+';transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,.2);"></div>' +
+        '<div class="cfg-switch'+(p.adVisible?" active":"")+'" data-toggle-my-ad="'+p.id+'" style="cursor:pointer;width:42px;height:24px;border-radius:12px;background:'+(p.adVisible?"#1abc9c":"var(--border)")+';position:relative;flex-shrink:0;transition:background .2s;">' +
+          '<div style="width:18px;height:18px;border-radius:50%;background:#fff;position:absolute;top:3px;left:'+(p.adVisible?"21px":"3px")+';transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,.2);"></div>' +
         '</div>' +
         '<button class="icon-btn" data-delete-my-ad="'+p.id+'" style="color:var(--muted);margin-left:6px;">'+icoSvg("close",16,"var(--muted)")+'</button>' +
       '</div>';
@@ -15970,9 +15972,9 @@ function bindMyAdsPage() {
       var pid = sw.getAttribute("data-toggle-my-ad");
       var post = posts.find(function(p){ return p.id === pid; });
       if (!post) return;
-      post.showOnProfile = !post.showOnProfile;
+      post.adVisible = !post.adVisible;
       render();
-      if (_idToken) fsSet("posts/"+pid, { showOnProfile: post.showOnProfile }).catch(function(err){
+      if (_idToken) fsSet("posts/"+pid, { adVisible: post.adVisible }).catch(function(err){
         console.error("Erro ao salvar visibilidade do anúncio:", err);
       });
     });
@@ -16432,7 +16434,7 @@ function renderPublishMenu() {
         '<div class="publish-menu-icon" style="background:linear-gradient(135deg,#2ecc71,#1abc9c);">'+icoSvg("megaphone",22,"#fff")+'</div>' +
         '<div class="publish-menu-text">' +
           '<div class="publish-menu-label">Anúncio</div>' +
-          '<div class="publish-menu-desc">Imagem ou vídeo promocional — fica fora do seu perfil por padrão</div>' +
+          '<div class="publish-menu-desc">Imagem ou vídeo promocional — marcado com selo "Anunciado"</div>' +
         '</div>' +
         '<span class="publish-menu-chevron">'+icoSvg("chevronRight",18,"var(--muted)")+'</span>' +
       '</button>' +
@@ -16455,12 +16457,12 @@ function bindPublishMenu() {
       var type = btn.getAttribute("data-publish-type");
       if (type === "post") {
         state.publishMenu = false;
-        compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:false, showOnProfile:false };
+        compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:false, adVisible:false };
         state.creating = true;
         render();
       } else if (type === "ad") {
         state.publishMenu = false;
-        compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:true, showOnProfile:false };
+        compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:true, adVisible:true };
         state.creating = true;
         render();
       } else if (type === "vibe") {
@@ -16727,14 +16729,10 @@ function renderCreatePost() {
     : "";
 
   var adToggle = compose.isAd
-    ? '<div class="cfg-item" data-toggle-ad-show-profile style="cursor:pointer;background:var(--bg);border-radius:12px;margin-top:10px;">' +
-        '<div class="cfg-item-icon" style="background:#e9fbf3;">'+icoSvg("user",18,"#1abc9c")+'</div>' +
-        '<div class="grow">' +
-          '<div class="cfg-item-label">Mostrar no meu perfil</div>' +
-          '<div class="cfg-item-sub">Desativado, o anúncio fica só em "Meus Anúncios"</div>' +
-        '</div>' +
-        '<div class="cfg-switch'+(compose.showOnProfile?" active":"")+'" style="width:42px;height:24px;border-radius:12px;background:'+(compose.showOnProfile?"#1abc9c":"var(--border)")+';position:relative;flex-shrink:0;transition:background .2s;">' +
-          '<div style="width:18px;height:18px;border-radius:50%;background:#fff;position:absolute;top:3px;left:'+(compose.showOnProfile?"21px":"3px")+';transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,.2);"></div>' +
+    ? '<div style="display:flex;gap:10px;align-items:flex-start;background:var(--bg);border-radius:12px;padding:12px;margin-top:10px;">' +
+        icoSvg("megaphone",18,"#1abc9c") +
+        '<div style="font-size:12.5px;color:var(--muted);line-height:1.5;">' +
+          'Ao publicar, o anúncio fica visível no Feed (com o selo "Anunciado"), no seu perfil e na busca — como uma publicação normal. Você pode ocultá-lo depois em Configurações → Meus Anúncios.' +
         '</div>' +
       '</div>'
     : "";
@@ -16887,13 +16885,6 @@ function bindCreatePost() {
   var emojiBtn = appEl.querySelector("[data-pick-emoji]");
   if (emojiBtn) emojiBtn.addEventListener("click", function() { toggleEmojiPanel("create"); });
 
-  // Toggle "Mostrar no meu perfil" (só existe na composição de Anúncio)
-  var adProfileToggle = appEl.querySelector("[data-toggle-ad-show-profile]");
-  if (adProfileToggle) adProfileToggle.addEventListener("click", function() {
-    compose.showOnProfile = !compose.showOnProfile;
-    render();
-  });
-
   if (submitBtn) {
     submitBtn.addEventListener("click", function() {
       var ta = appEl.querySelector("[data-post-text]");
@@ -16912,7 +16903,7 @@ function bindCreatePost() {
         audioMeta: compose.mediaType === "audio" ? compose.audioMeta : null,
         loc: compose.loc,
         isAd: !!compose.isAd,
-        showOnProfile: compose.isAd ? !!compose.showOnProfile : true,
+        adVisible: true, // Publicar já liga tudo (Feed + Perfil + Busca), como um post normal
         likedBy:[], saved:false, time:"agora",
       };
       posts.unshift(newPost);
@@ -16922,23 +16913,16 @@ function bindCreatePost() {
       state.viewProfileId = null;
       state.profileStack.length = 0;
       state.postDetailId = null;
-      compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:false, showOnProfile:false };
-      if (wasAd) {
-        // Anúncio não aparece no feed — leva pra "Meus Anúncios" pra confirmar que foi publicado.
-        state.myAdsOpen = true;
-        render();
-        showToast(toastWithIcon("Anúncio publicado! Ele fica fora do seu perfil até você ativar.", "success"), true);
-      } else {
-        state.page = "feed";
-        render();
-        window.scrollTo(0,0);
-        showToast(toastWithIcon("Publicado!", "success"), true);
-      }
+      compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:false, adVisible:false };
+      state.page = "feed";
+      render();
+      window.scrollTo(0,0);
+      showToast(toastWithIcon(wasAd ? "Anúncio publicado!" : "Publicado!", "success"), true);
     });
   }
   if (closeBtn) closeBtn.addEventListener("click", function() {
     state.creating = false;
-    compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:false, showOnProfile:false };
+    compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:false, adVisible:false };
     render();
   });
 }
