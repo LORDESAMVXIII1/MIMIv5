@@ -2066,23 +2066,24 @@ function renderBioWithMentions(text) { return renderTextWithMentions(text); }
 // Mantém a ordem cronológica geral, mas "adianta" os posts de assinantes em
 // até PLUS_FEED_BOOST posições — efeito visível sem esconder quem não assina.
 var PLUS_FEED_BOOST = 3;
+// ── Anúncios: dono do app + locais de exibição (escopo GLOBAL) ──
+var APP_OWNER_EMAIL = "franciscoviei123@gmail.com";
+function isAppOwner(u) {
+  u = u || (typeof ME !== "undefined" ? ME : null);
+  return !!(u && u.email === APP_OWNER_EMAIL);
+}
+function adPlacesOf(p) {
+  var d = (p && p.adPlaces) || null;
+  if (!d) return { feed:true, profile:true, search:true, banner:false };
+  return { feed: d.feed !== false, profile: d.profile !== false, search: d.search !== false, banner: !!d.banner };
+}
+function adShowsIn(p, where) {
+  if (!p || !p.isAd) return true;
+  if (!p.adVisible) return false;
+  return !!adPlacesOf(p)[where];
+}
+
 function getFeedOrder(list) {
-  // ── Anúncios: dono do app + locais de exibição ───────────────
-  var APP_OWNER_EMAIL = "franciscoviei123@gmail.com";
-  function isAppOwner(u) {
-    u = u || (typeof ME !== "undefined" ? ME : null);
-    return !!(u && u.email === APP_OWNER_EMAIL);
-  }
-  function adPlacesOf(p) {
-    var d = (p && p.adPlaces) || null;
-    if (!d) return { feed:true, profile:true, search:true, banner:false };
-    return { feed: d.feed !== false, profile: d.profile !== false, search: d.search !== false, banner: !!d.banner };
-  }
-  function adShowsIn(p, where) {
-    if (!p || !p.isAd) return true;
-    if (!p.adVisible) return false;
-    return !!adPlacesOf(p)[where];
-  }
   // Anúncio só entra no feed se estiver marcado como visível (adVisible) —
   // é o mesmo switch único que controla Feed + Perfil + Busca ao mesmo tempo.
   list = list.filter(function(p){ return !isUserBlocked(p.authorId) && adShowsIn(p, "feed"); });
