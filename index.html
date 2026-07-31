@@ -19265,10 +19265,11 @@ var VibesModule = {
   // Anúncio renderizado como um slide de Vibe (sem fogo e sem download).
   renderAdSlide: function(ad) {
     var au = USERS[ad.authorId] || { name:"MIMI", avatar:"https://api.dicebear.com/7.x/avataaars/svg?seed="+ad.authorId };
+    var mediaStyle = 'position:absolute;inset:0;width:100%;height:100%;max-width:100%;max-height:100%;object-fit:cover;background:#000;display:block;';
     var media = ad.video
-      ? '<video class="vibe-video" src="'+ad.video+'" playsinline webkit-playsinline loop muted autoplay preload="auto"></video>'
-      : '<img class="vibe-video" src="'+ad.img+'" alt="" style="object-fit:cover;">';
-    return '<div class="vibe-slide vibe-slide-ad">' +
+      ? '<video class="vibe-video" src="'+ad.video+'" playsinline webkit-playsinline loop muted autoplay preload="auto" style="'+mediaStyle+'"></video>'
+      : '<img class="vibe-video" src="'+ad.img+'" alt="" style="'+mediaStyle+'">';
+    return '<div class="vibe-slide vibe-slide-ad" style="position:relative;width:100%;height:100%;background:#000;overflow:hidden;">' +
       media +
       '<div class="vibe-info">' +
         '<div class="who" data-open-author="'+(ad.authorId||"")+'" style="cursor:pointer;align-items:flex-start;">' +
@@ -19296,7 +19297,7 @@ var VibesModule = {
   renderPage: function() {
     var self = this;
     var adSlides = adsForPlace("vibes");
-    var html = '<div class="vibes-page">';
+    var html = '<div class="vibes-page" style="position:relative;width:100%;height:100vh;height:100dvh;background:#000;overflow:hidden;">';
     
     if (this.vibes.length === 0 && adSlides.length === 0 && this._loading) {
       html += '<div style="display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;color:#fff;padding:20px;">' +
@@ -19310,7 +19311,7 @@ var VibesModule = {
         '<p style="color:rgba(255,255,255,.6);text-align:center;">Seja o primeiro a criar uma vibe!</p>' +
         '</div>';
     } else {
-      html += '<div class="vibes-feed-scroll">';
+      html += '<div class="vibes-feed-scroll" style="height:100vh;height:100dvh;width:100%;overflow-y:scroll;scroll-snap-type:y mandatory;">';
       var _adCursor = 0;
       this.vibes.forEach(function(vibe, idx) {
         // um anúncio a cada 3 vibes
