@@ -252,9 +252,9 @@
 
   /* Botão de som: fica FORA do overlay de controles, por isso não some
      quando o overlay está com opacity:0 (mostra sempre, como pedido) */
-  .mute-btn { position:absolute; bottom:10px; right:10px; top:auto; width:28px; height:28px; border:none; background:rgba(0,0,0,.4); border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:11; backdrop-filter:blur(4px); padding:0; }
-  .mute-btn:hover { background:rgba(0,0,0,.55); }
-  .mute-btn svg { width:16px; height:16px; }
+  .mute-btn { position:absolute; bottom:10px; right:10px; top:auto; width:28px; height:28px; border:none; background:none; border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:11; padding:0; }
+  .mute-btn:hover { background:none; }
+  .mute-btn svg { width:16px; height:16px; filter:drop-shadow(0 1px 3px rgba(0,0,0,.6)); }
 
   /* Brilhos animados (piscando/pulsando) em todos os ícones sparkle */
   .sparkle-spark, .sparkle-dot { transform-box: fill-box; transform-origin: center; animation: sparkleTwinkle 1.4s ease-in-out infinite; }
