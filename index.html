@@ -16707,7 +16707,10 @@ function publishVibeItem(videoSrc, caption) {
   showToast("Publicando sua vibe…");
   FB.createVibe(newVibe).then(function() {
     newVibe.createdAt = Date.now(); // mantém numérico p/ ordenação local (createVibe grava ISO no Firestore)
-    VibesModule.vibes.unshift(newVibe);
+    // FIX: antes ia sempre pro topo (unshift); agora entra na posição certa
+    // pro ranking por curtidas (0 curtidas = vai pro fim, junto dos outros
+    // vídeos sem engajamento ainda).
+    VibesModule.vibes.push(newVibe);
     render();
     showToast("Vibe publicada! <svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"vertical-align:-3px;margin-left:4px\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M8 12.5l2.5 2.5L16 9.5\"/></svg>", true);
   }).catch(function(err) {
@@ -19278,7 +19281,9 @@ var VibesModule = {
     self._loading = true;
     if (state.page === "vibes") render();
     FB.loadVibes().then(function(vibes) {
-      vibes.sort(function(a, b) { return (b.createdAt||0) - (a.createdAt||0); });
+      // Ordena por engajamento (curtidas), do mais curtido pro menos curtido —
+      // antes era por data de publicação (mais recente primeiro).
+      vibes.sort(function(a, b) { return (b.likes||0) - (a.likes||0); });
       self.vibes = vibes;
       self._loading = false;
       render(); // perfil e outras telas também dependem de VibesModule.vibes (ver userVibes)
