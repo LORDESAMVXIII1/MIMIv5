@@ -54,6 +54,8 @@
   .hidden { display:none !important; }
   .fade-in { animation: fadeIn .15s ease; }
   @keyframes fadeIn { from{opacity:0} to{opacity:1} }
+  .fade-out { animation: fadeOutOverlay .14s ease forwards; }
+  @keyframes fadeOutOverlay { from{opacity:1} to{opacity:0} }
   @keyframes pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.08)} }
 
   .btn { border-radius:16px; cursor:pointer; padding:11px 20px; font-size:14px; font-weight:700; display:flex; align-items:center; justify-content:center; gap:6px; border:none; }
@@ -17075,15 +17077,30 @@ function bindCreatePost() {
       posts.unshift(newPost);
       FB.createPost(newPost);
       var wasAd = compose.isAd;
-      state.creating = false;
-      state.viewProfileId = null;
-      state.profileStack.length = 0;
-      state.postDetailId = null;
-      compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:false, adVisible:false, adPlaces:{ feed:true, profile:true, search:true, banner:false, stories:false, vibes:false } };
-      state.page = "feed";
-      render();
-      window.scrollTo(0,0);
-      showToast(toastWithIcon(wasAd ? "Anúncio publicado!" : "Publicado!", "success"), true);
+
+      // FIX: antes, fechar o composer e trocar de página aconteciam no mesmo
+      // render() — a tela inteira (overlay + feed) era destruída e reconstruída
+      // de uma vez, o que aparecia como um "flash" na tela. Agora damos um
+      // fade-out rápido no overlay do composer ANTES de trocar o estado, então
+      // a transição fica suave em vez de um corte abrupto.
+      var overlayEl = appEl.querySelector(".create-overlay");
+      function finishPublish() {
+        state.creating = false;
+        state.viewProfileId = null;
+        state.profileStack.length = 0;
+        state.postDetailId = null;
+        compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:false, adVisible:false, adPlaces:{ feed:true, profile:true, search:true, banner:false, stories:false, vibes:false } };
+        state.page = "feed";
+        render();
+        window.scrollTo(0,0);
+        showToast(toastWithIcon(wasAd ? "Anúncio publicado!" : "Publicado!", "success"), true);
+      }
+      if (overlayEl) {
+        overlayEl.classList.add("fade-out");
+        setTimeout(finishPublish, 140);
+      } else {
+        finishPublish();
+      }
     });
   }
   if (closeBtn) closeBtn.addEventListener("click", function() {
