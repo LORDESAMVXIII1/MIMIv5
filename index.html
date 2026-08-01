@@ -8126,6 +8126,19 @@ function _restorePlayingTrack(info) {
 
 var _isRendering = false;
 var _renderQueued = false;
+// uids já buscados no Firestore (mesmo que o doc não exista) — evita
+// buscas e renders repetidos em loop.
+var _userFetchTried = {};
+// Agrupa vários pedidos de render() vindos de respostas de rede em um só,
+// para a tela não piscar a cada usuário/anúncio que chega.
+var _renderSoonTimer = null;
+function renderSoon() {
+  if (_renderSoonTimer) return;
+  _renderSoonTimer = setTimeout(function() {
+    _renderSoonTimer = null;
+    render();
+  }, 180);
+}
 var _navSwitching = false;
 var _messageIdToPreserve = null; // Usada para preservar posição ao reagir a mensagem
 var _lastRenderedMsgCount = {};
@@ -8180,11 +8193,21 @@ function render() {
       };
     }
   }
+  // FIX Vibes: o render() recria todo o DOM, então sem guardar a rolagem o
+  // feed voltava sempre pro primeiro slide (dava a sensação de travar numa
+  // publicação só).
+  var _vibesRoot = (typeof appEl !== "undefined" && appEl) || document.getElementById("app") || document;
+  var _vibesScrollEl = _vibesRoot.querySelector(".vibes-feed-scroll");
+  var _vibesScrollTop = _vibesScrollEl ? _vibesScrollEl.scrollTop : null;
   try {
     _renderImpl();
   } finally {
     _isRendering = false;
     _messageIdToPreserve = null; // Limpar após usar
+  }
+  if (_vibesScrollTop) {
+    var _newVibesScroll = ((typeof appEl !== "undefined" && appEl) || document.getElementById("app") || document).querySelector(".vibes-feed-scroll");
+    if (_newVibesScroll) _newVibesScroll.scrollTop = _vibesScrollTop;
   }
   if (_chatScrollInfo) {
     window.scrollTo(0,0);
@@ -10288,10 +10311,12 @@ function renderCommentItem(pid, c, allCmts, isPostOwner, depth) {
 function renderFeedPage() {
   // Carrega autores desconhecidos do Firebase em background
   if (_idToken) {
+    _userFetchTried = _userFetchTried || {};
     posts.forEach(function(p) {
-      if (!USERS[p.authorId]) {
+      if (!USERS[p.authorId] && p.authorId && !_userFetchTried[p.authorId]) {
+        _userFetchTried[p.authorId] = true;
         fsGet("users/" + p.authorId).then(function(u) {
-          if (u) { delete u._id; u.uid = p.authorId; USERS[p.authorId] = u; render(); }
+          if (u) { delete u._id; u.uid = p.authorId; USERS[p.authorId] = u; renderSoon(); }
         }).catch(function(){});
       }
     });
@@ -19268,13 +19293,20 @@ var VibesModule = {
   // ele ainda não está em USERS, e re-renderiza assim que chegar.
   fetchMissingUser: function(uid) {
     if (!uid || USERS[uid] || !_idToken) return;
-    var self = this;
+    // FIX: sem esta trava, cada render() das Vibes disparava de novo a
+    // busca dos autores desconhecidos e cada resposta chamava render()
+    // outra vez — a tela "piscava" e o feed voltava pro primeiro slide
+    // (parecia travado numa publicação). Agora cada uid é buscado uma
+    // única vez e a re-renderização é agrupada.
+    _userFetchTried = _userFetchTried || {};
+    if (_userFetchTried[uid]) return;
+    _userFetchTried[uid] = true;
     fsGet("users/" + uid).then(function(u) {
       if (u) {
         delete u._id;
         u.uid = uid;
         USERS[uid] = u;
-        if (state.page === "vibes") render();
+        renderSoon();
       }
     }).catch(function(){});
   },
@@ -19282,7 +19314,7 @@ var VibesModule = {
   // Anúncio renderizado como um slide de Vibe (sem fogo e sem download).
   renderAdSlide: function(ad) {
     var au = USERS[ad.authorId] || { name:"MIMI", avatar:"https://api.dicebear.com/7.x/avataaars/svg?seed="+ad.authorId };
-    var mediaStyle = 'position:absolute;inset:0;width:100%;height:100%;max-width:100%;max-height:100%;object-fit:cover;background:#000;display:block;';
+    var mediaStyle = 'position:absolute;inset:0;width:100%;height:100%;max-width:100%;max-height:100%;object-fit:contain;background:#000;display:block;';
     var media = ad.video
       ? '<video class="vibe-video" src="'+ad.video+'" playsinline webkit-playsinline loop muted autoplay preload="auto" style="'+mediaStyle+'"></video>'
       : '<img class="vibe-video" src="'+ad.img+'" alt="" style="'+mediaStyle+'">';
