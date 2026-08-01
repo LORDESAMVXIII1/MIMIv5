@@ -5358,6 +5358,7 @@ var FB = {
       loc:       postData.loc   || null,
       isAd:      !!postData.isAd,
       adVisible: postData.adVisible !== false,
+      commentsEnabled: postData.commentsEnabled !== false,
       adPlaces:  postData.adPlaces || null,
       likedBy:   [],
       fireTotal: 0,
@@ -7754,7 +7755,7 @@ var state = {
   photoViewerUrl: null, // url da foto de perfil aberta em tela cheia
 };
 
-var compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:false, adVisible:false, adPlaces:{ feed:true, profile:true, search:true, banner:false, stories:false, vibes:false } };
+var compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:false, adVisible:false, commentsEnabled:true, adPlaces:{ feed:true, profile:true, search:true, banner:false, stories:false, vibes:false } };
 
 // ─── BUSCA DE MÚSICA (iTunes Search API — prévias oficiais de 30s) ─────
 var musicSearch = { open:false, query:"", results:[], loading:false, error:null, seq:0 };
@@ -8126,19 +8127,6 @@ function _restorePlayingTrack(info) {
 
 var _isRendering = false;
 var _renderQueued = false;
-// uids já buscados no Firestore (mesmo que o doc não exista) — evita
-// buscas e renders repetidos em loop.
-var _userFetchTried = {};
-// Agrupa vários pedidos de render() vindos de respostas de rede em um só,
-// para a tela não piscar a cada usuário/anúncio que chega.
-var _renderSoonTimer = null;
-function renderSoon() {
-  if (_renderSoonTimer) return;
-  _renderSoonTimer = setTimeout(function() {
-    _renderSoonTimer = null;
-    render();
-  }, 180);
-}
 var _navSwitching = false;
 var _messageIdToPreserve = null; // Usada para preservar posição ao reagir a mensagem
 var _lastRenderedMsgCount = {};
@@ -8193,21 +8181,11 @@ function render() {
       };
     }
   }
-  // FIX Vibes: o render() recria todo o DOM, então sem guardar a rolagem o
-  // feed voltava sempre pro primeiro slide (dava a sensação de travar numa
-  // publicação só).
-  var _vibesRoot = (typeof appEl !== "undefined" && appEl) || document.getElementById("app") || document;
-  var _vibesScrollEl = _vibesRoot.querySelector(".vibes-feed-scroll");
-  var _vibesScrollTop = _vibesScrollEl ? _vibesScrollEl.scrollTop : null;
   try {
     _renderImpl();
   } finally {
     _isRendering = false;
     _messageIdToPreserve = null; // Limpar após usar
-  }
-  if (_vibesScrollTop) {
-    var _newVibesScroll = ((typeof appEl !== "undefined" && appEl) || document.getElementById("app") || document).querySelector(".vibes-feed-scroll");
-    if (_newVibesScroll) _newVibesScroll.scrollTop = _vibesScrollTop;
   }
   if (_chatScrollInfo) {
     window.scrollTo(0,0);
@@ -10198,7 +10176,7 @@ function renderPostCard(post, opts) {
     '<div class="post-actions">' +
       '<button class="act-btn '+(liked?"liked":"")+'" data-like="'+post.id+'">'+cuteFaceSvg(24,liked?C.pink:"var(--sub)",liked)+' <span data-like-count="'+post.id+'">'+fmtNum(postLikeCount(post))+'</span></button>' +
       (post.isAd ? "" : '<button class="act-btn '+(fired?"fired":"")+'" data-fire="'+post.id+'">'+fireSvg(24,"var(--sub)",fired)+' <span data-fire-count="'+post.id+'">'+fmtNum(postFireCount(post))+'</span></button>') +
-      '<button class="act-btn" data-toggle-comments="'+post.id+'">'+sparkleIcon("comment",30,"var(--sub)")+' '+fmtNum(commentCount)+'</button>' +
+      '<button class="act-btn" data-toggle-comments="'+post.id+'" style="'+(post.commentsEnabled===false?"opacity:.45;":"")+'">'+sparkleIcon("comment",30,"var(--sub)")+' '+(post.commentsEnabled===false?"":fmtNum(commentCount))+'</button>' +
       '<button class="act-btn" data-share-post="'+post.id+'">'+sparkleIcon("share",30,"var(--sub)")+' '+fmtNum(postShareCount(post))+'</button>' +
       ((post.img || post.video || post.audio) ?
         '<div style="margin-left:auto;display:flex;align-items:center;gap:14px;">' +
@@ -10208,10 +10186,11 @@ function renderPostCard(post, opts) {
           '<button class="act-btn '+(post.saved?"saved":"")+'" data-save="'+post.id+'">'+sparkleIcon("save",30,post.saved?C.accent:"var(--sub)",post.saved)+'</button>' +
         '</div>' : "") +
     '</div>' +
+    (post.commentsEnabled===false ? "" :
     '<div class="comments-box '+((opts.commentsOpen || state.openComments[post.id])?"":"hidden")+'" data-comments-box="'+post.id+'">' +
       renderCommentsList(post.id, post.authorId === ME_ID) +
       renderCommentInputRow(post.id) +
-    '</div>' +
+    '</div>') +
   '</div>';
 }
 
@@ -10311,12 +10290,10 @@ function renderCommentItem(pid, c, allCmts, isPostOwner, depth) {
 function renderFeedPage() {
   // Carrega autores desconhecidos do Firebase em background
   if (_idToken) {
-    _userFetchTried = _userFetchTried || {};
     posts.forEach(function(p) {
-      if (!USERS[p.authorId] && p.authorId && !_userFetchTried[p.authorId]) {
-        _userFetchTried[p.authorId] = true;
+      if (!USERS[p.authorId]) {
         fsGet("users/" + p.authorId).then(function(u) {
-          if (u) { delete u._id; u.uid = p.authorId; USERS[p.authorId] = u; renderSoon(); }
+          if (u) { delete u._id; u.uid = p.authorId; USERS[p.authorId] = u; render(); }
         }).catch(function(){});
       }
     });
@@ -10616,6 +10593,11 @@ function bindPostCardEvents() {
   appEl.querySelectorAll("[data-toggle-comments]").forEach(function(btn) {
     btn.addEventListener("click", function() {
       var pid = btn.getAttribute("data-toggle-comments");
+      var pPost = posts.find(function(p){ return p.id === pid; });
+      if (pPost && pPost.commentsEnabled === false) {
+        showToast(toastWithIcon(pPost.isAd ? "Comentários desativados para este anúncio." : "Comentários desativados para esta publicação.", "warning", "before"), true);
+        return;
+      }
       var opening = !state.openComments[pid];
       if (opening) {
         // Comportamento em "acordeão": só uma publicação por vez fica com
@@ -16615,12 +16597,12 @@ function bindPublishMenu() {
       var type = btn.getAttribute("data-publish-type");
       if (type === "post") {
         state.publishMenu = false;
-        compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:false, adVisible:false, adPlaces:{ feed:true, profile:true, search:true, banner:false, stories:false, vibes:false } };
+        compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:false, adVisible:false, commentsEnabled:true, adPlaces:{ feed:true, profile:true, search:true, banner:false, stories:false, vibes:false } };
         state.creating = true;
         render();
       } else if (type === "ad") {
         state.publishMenu = false;
-        compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:true, adVisible:true, adPlaces:{ feed:true, profile:true, search:true, banner:false, stories:false, vibes:false } };
+        compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:true, adVisible:true, commentsEnabled:true, adPlaces:{ feed:true, profile:true, search:true, banner:false, stories:false, vibes:false } };
         state.creating = true;
         render();
       } else if (type === "vibe") {
@@ -16914,6 +16896,16 @@ function renderCreatePost() {
       '</div>'
     : "";
 
+  var commentsToggle = '<div class="row" data-toggle-comments-allowed style="gap:10px;align-items:center;padding:8px 0;cursor:pointer;margin-top:6px;">' +
+      '<div class="grow" style="min-width:0;">' +
+        '<div style="font-weight:700;font-size:13px;">Permitir comentários</div>' +
+        '<div style="font-size:11.5px;color:var(--muted);line-height:1.4;">'+(compose.isAd?"Desative para não receber comentários neste anúncio":"Desative para não receber comentários nesta publicação")+'</div>' +
+      '</div>' +
+      '<div style="flex-shrink:0;width:42px;height:24px;border-radius:12px;background:'+(compose.commentsEnabled!==false?"#1abc9c":"var(--border)")+';position:relative;transition:background .2s;">' +
+        '<div style="width:18px;height:18px;border-radius:50%;background:#fff;position:absolute;top:3px;left:'+(compose.commentsEnabled!==false?"21px":"3px")+';transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,.2);"></div>' +
+      '</div>' +
+    '</div>';
+
   return '<div class="create-overlay fade-in">' +
     '<div class="create-header">' +
       '<button class="icon-btn" data-close-create style="color:var(--sub);">'+icoSvg("back",22)+'</button>' +
@@ -16929,7 +16921,7 @@ function renderCreatePost() {
             '<textarea class="create-textarea" placeholder="'+(compose.isAd?"Descreva o anúncio…":"O que está acontecendo?")+'" data-post-text></textarea>' +
             '<span data-post-sparkle style="position:absolute;top:2px;right:0;pointer-events:none;opacity:.55;">'+icoSvg("sparkle",18,C.accent)+'</span>' +
           '</div>' +
-          mediaPreview + locPreview + adToggle +
+          mediaPreview + locPreview + adToggle + commentsToggle +
         '</div>' +
       '</div>' +
     '</div>' +
@@ -17070,6 +17062,14 @@ function bindCreatePost() {
     });
   });
 
+  var commentsAllowedRow = appEl.querySelector("[data-toggle-comments-allowed]");
+  if (commentsAllowedRow) {
+    commentsAllowedRow.addEventListener("click", function() {
+      compose.commentsEnabled = compose.commentsEnabled === false ? true : false;
+      render();
+    });
+  }
+
   if (submitBtn) {
     submitBtn.addEventListener("click", function() {
       var ta = appEl.querySelector("[data-post-text]");
@@ -17089,6 +17089,7 @@ function bindCreatePost() {
         loc: compose.loc,
         isAd: !!compose.isAd,
         adVisible: true,
+        commentsEnabled: compose.commentsEnabled !== false,
         adPlaces: compose.isAd ? {
           feed: !!compose.adPlaces.feed,
           profile: !!compose.adPlaces.profile,
@@ -17114,7 +17115,7 @@ function bindCreatePost() {
         state.viewProfileId = null;
         state.profileStack.length = 0;
         state.postDetailId = null;
-        compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:false, adVisible:false, adPlaces:{ feed:true, profile:true, search:true, banner:false, stories:false, vibes:false } };
+        compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:false, adVisible:false, commentsEnabled:true, adPlaces:{ feed:true, profile:true, search:true, banner:false, stories:false, vibes:false } };
         state.page = "feed";
         render();
         window.scrollTo(0,0);
@@ -17130,7 +17131,7 @@ function bindCreatePost() {
   }
   if (closeBtn) closeBtn.addEventListener("click", function() {
     state.creating = false;
-    compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:false, adVisible:false, adPlaces:{ feed:true, profile:true, search:true, banner:false, stories:false, vibes:false } };
+    compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:false, adVisible:false, commentsEnabled:true, adPlaces:{ feed:true, profile:true, search:true, banner:false, stories:false, vibes:false } };
     render();
   });
 }
@@ -19293,20 +19294,13 @@ var VibesModule = {
   // ele ainda não está em USERS, e re-renderiza assim que chegar.
   fetchMissingUser: function(uid) {
     if (!uid || USERS[uid] || !_idToken) return;
-    // FIX: sem esta trava, cada render() das Vibes disparava de novo a
-    // busca dos autores desconhecidos e cada resposta chamava render()
-    // outra vez — a tela "piscava" e o feed voltava pro primeiro slide
-    // (parecia travado numa publicação). Agora cada uid é buscado uma
-    // única vez e a re-renderização é agrupada.
-    _userFetchTried = _userFetchTried || {};
-    if (_userFetchTried[uid]) return;
-    _userFetchTried[uid] = true;
+    var self = this;
     fsGet("users/" + uid).then(function(u) {
       if (u) {
         delete u._id;
         u.uid = uid;
         USERS[uid] = u;
-        renderSoon();
+        if (state.page === "vibes") render();
       }
     }).catch(function(){});
   },
@@ -19314,7 +19308,7 @@ var VibesModule = {
   // Anúncio renderizado como um slide de Vibe (sem fogo e sem download).
   renderAdSlide: function(ad) {
     var au = USERS[ad.authorId] || { name:"MIMI", avatar:"https://api.dicebear.com/7.x/avataaars/svg?seed="+ad.authorId };
-    var mediaStyle = 'position:absolute;inset:0;width:100%;height:100%;max-width:100%;max-height:100%;object-fit:contain;background:#000;display:block;';
+    var mediaStyle = 'position:absolute;inset:0;width:100%;height:100%;max-width:100%;max-height:100%;object-fit:cover;background:#000;display:block;';
     var media = ad.video
       ? '<video class="vibe-video" src="'+ad.video+'" playsinline webkit-playsinline loop muted autoplay preload="auto" style="'+mediaStyle+'"></video>'
       : '<img class="vibe-video" src="'+ad.img+'" alt="" style="'+mediaStyle+'">';
