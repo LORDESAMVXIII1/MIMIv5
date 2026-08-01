@@ -19308,10 +19308,17 @@ var VibesModule = {
   // Anúncio renderizado como um slide de Vibe (sem fogo e sem download).
   renderAdSlide: function(ad) {
     var au = USERS[ad.authorId] || { name:"MIMI", avatar:"https://api.dicebear.com/7.x/avataaars/svg?seed="+ad.authorId };
-    var mediaStyle = 'position:absolute;inset:0;width:100%;height:100%;max-width:100%;max-height:100%;object-fit:cover;background:#000;display:block;';
+    var videoStyle = 'position:absolute;inset:0;width:100%;height:100%;max-width:100%;max-height:100%;object-fit:cover;background:#000;display:block;';
+    // FIX: imagens de anúncio (formato Feed, quadrado/paisagem) estavam sendo
+    // esticadas com object-fit:cover dentro do slide vertical de tela cheia
+    // das Vibes, cortando e "zoomando" a arte de forma desproporcional.
+    // Para imagens usamos "contain" (mostra a arte inteira, sem cortar) com
+    // fundo preto preenchendo as sobras; vídeos continuam em "cover" porque
+    // já costumam vir no formato vertical das Vibes.
+    var imgStyle = 'position:absolute;inset:0;width:100%;height:100%;max-width:100%;max-height:100%;object-fit:contain;background:#000;display:block;';
     var media = ad.video
-      ? '<video class="vibe-video" src="'+ad.video+'" playsinline webkit-playsinline loop muted autoplay preload="auto" style="'+mediaStyle+'"></video>'
-      : '<img class="vibe-video" src="'+ad.img+'" alt="" style="'+mediaStyle+'">';
+      ? '<video class="vibe-video" src="'+ad.video+'" playsinline webkit-playsinline loop muted autoplay preload="auto" style="'+videoStyle+'"></video>'
+      : '<img class="vibe-video" src="'+ad.img+'" alt="" style="'+imgStyle+'">';
     return '<div class="vibe-slide vibe-slide-ad" style="position:relative;width:100%;height:100%;background:#000;overflow:hidden;">' +
       media +
       '<div class="vibe-info">' +
