@@ -19270,7 +19270,7 @@ var VibesModule = {
     if (!_idToken) {
       setTimeout(function() {
         self._userLoaded = false;
-        if (state.page === "vibes") renderVibesPage();
+        if (state.page === "vibes") render();
       }, 600);
       return;
     }
@@ -19342,7 +19342,7 @@ var VibesModule = {
     var adSlides = adsForPlace("vibes");
     var html = '<div class="vibes-page" style="position:relative;width:100%;height:100vh;height:100dvh;background:#000;overflow:hidden;">';
     
-    if (this.vibes.length === 0 && adSlides.length === 0 && this._loading) {
+    if (this.vibes.length === 0 && this._loading) {
       html += '<div style="display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;color:#fff;padding:20px;">' +
         '<div style="margin-bottom:20px;">'+icoSvg("sparkle",44,"var(--accentL,#ffb3d1)",true)+'</div>' +
         '<h2>Carregando vibes…</h2>' +
