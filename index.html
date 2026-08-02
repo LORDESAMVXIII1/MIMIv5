@@ -10261,7 +10261,7 @@ function renderFeedPage() {
     '</button>' +
   '</div>' +
   '<div style="background:var(--surface);border-bottom:1px solid var(--border);padding-top:12px;">' + renderStories() + '</div>' +
-  '<div>';
+  '<div data-feed-posts>';
   var _feedOrdered = getFeedOrder(posts).filter(function(p) { return FEED_MUSIC_POSTS_ENABLED || !p.audio; });
   var _feedSlice = _feedOrdered.slice(0, state.feedRenderLimit);
   _feedSlice.forEach(function(p) { html += renderPostCard(p); });
@@ -10292,21 +10292,22 @@ function bindFeedPage() {
   }
 }
 
-function bindPostCardEvents() {
+function bindPostCardEvents(root) {
+  root = root || appEl;
   bindTrackPlayers();
-  appEl.querySelectorAll("[data-open-author]").forEach(function(el) {
+  root.querySelectorAll("[data-open-author]").forEach(function(el) {
     el.addEventListener("click", function(e) {
       e.stopPropagation();
       openProfile(el.getAttribute("data-open-author"));
     });
   });
-  appEl.querySelectorAll("[data-open-post], [data-open-post-media]").forEach(function(el) {
+  root.querySelectorAll("[data-open-post], [data-open-post-media]").forEach(function(el) {
     el.addEventListener("click", function(e) {
       e.stopPropagation();
       openPostDetail(el.getAttribute("data-open-post") || el.getAttribute("data-open-post-media"));
     });
   });
-  appEl.querySelectorAll("[data-open-sheet]").forEach(function(btn) {
+  root.querySelectorAll("[data-open-sheet]").forEach(function(btn) {
     btn.addEventListener("click", function(e) {
       e.stopPropagation();
       state.actionSheetPostId = btn.getAttribute("data-open-sheet");
@@ -10331,7 +10332,7 @@ function bindPostCardEvents() {
     }
   }
 
-  appEl.querySelectorAll("[data-like]").forEach(function(btn) {
+  root.querySelectorAll("[data-like]").forEach(function(btn) {
     btn.addEventListener("click", function() {
       var pid = btn.getAttribute("data-like");
       var post = posts.find(function(p){ return p.id === pid; });
@@ -10397,7 +10398,7 @@ function bindPostCardEvents() {
     _fireWriteChain[pid] = next;
     return next;
   }
-  appEl.querySelectorAll("[data-fire]").forEach(function(btn) {
+  root.querySelectorAll("[data-fire]").forEach(function(btn) {
     // Guarda anti-listener-duplicado: bindPostActions pode rodar mais de
     // uma vez sobre o mesmo botão (o elemento sobrevive entre renders
     // parciais como o syncReactionButtons). Sem isso, cada re-bind
@@ -10463,7 +10464,7 @@ function bindPostCardEvents() {
       });
     });
   });
-  appEl.querySelectorAll("[data-save]").forEach(function(btn) {
+  root.querySelectorAll("[data-save]").forEach(function(btn) {
     btn.addEventListener("click", function() {
       var pid = btn.getAttribute("data-save");
       var post = posts.find(function(p){ return p.id === pid; });
@@ -10474,7 +10475,7 @@ function bindPostCardEvents() {
       btn.innerHTML = sparkleIcon("save",30,post.saved?C.accent:"var(--sub)",post.saved);
     });
   });
-  appEl.querySelectorAll("[data-download-post]").forEach(function(btn) {
+  root.querySelectorAll("[data-download-post]").forEach(function(btn) {
     btn.addEventListener("click", function(e) {
       e.stopPropagation();
       var pid = btn.getAttribute("data-download-post");
@@ -10496,7 +10497,7 @@ function bindPostCardEvents() {
       }
     });
   });
-  appEl.querySelectorAll("[data-share-post]").forEach(function(btn) {
+  root.querySelectorAll("[data-share-post]").forEach(function(btn) {
     btn.addEventListener("click", function(e) { 
       e.stopPropagation();
       var postId = btn.getAttribute("data-share-post");
@@ -10543,7 +10544,7 @@ function bindPostCardEvents() {
       }
     });
   });
-  appEl.querySelectorAll("[data-toggle-comments]").forEach(function(btn) {
+  root.querySelectorAll("[data-toggle-comments]").forEach(function(btn) {
     btn.addEventListener("click", function() {
       var pid = btn.getAttribute("data-toggle-comments");
       var pPost = posts.find(function(p){ return p.id === pid; });
@@ -10592,14 +10593,15 @@ function bindPostCardEvents() {
       }
     });
   });
-  bindCommentEvents();
+  bindCommentEvents(root);
 }
 
-function bindCommentEvents() {
-  appEl.querySelectorAll("[data-add-comment]").forEach(function(btn) {
+function bindCommentEvents(root) {
+  root = root || appEl;
+  root.querySelectorAll("[data-add-comment]").forEach(function(btn) {
     btn.addEventListener("click", function() { addComment(btn.getAttribute("data-add-comment")); });
   });
-  appEl.querySelectorAll("[data-comment-input]").forEach(function(input) {
+  root.querySelectorAll("[data-comment-input]").forEach(function(input) {
     var pid = input.getAttribute("data-comment-input");
     var mentionBox = appEl.querySelector('[data-comment-mention-box="'+pid+'"]');
     var mentionTimer = null;
@@ -10702,14 +10704,14 @@ function bindCommentEvents() {
       setTimeout(closeMentionBox, 150); // delay pra deixar o mousedown do clique disparar
     });
   });
-  appEl.querySelectorAll("[data-toggle-replies]").forEach(function(btn) {
+  root.querySelectorAll("[data-toggle-replies]").forEach(function(btn) {
     btn.addEventListener("click", function() {
       var cid = btn.getAttribute("data-toggle-replies");
       state.expandedReplies[cid] = !state.expandedReplies[cid];
       render();
     });
   });
-  appEl.querySelectorAll("[data-like-comment]").forEach(function(btn) {
+  root.querySelectorAll("[data-like-comment]").forEach(function(btn) {
     btn.addEventListener("click", function() {
       var parts = btn.getAttribute("data-like-comment").split(":");
       var cmts = getComments(parts[0]);
@@ -10735,7 +10737,7 @@ function bindCommentEvents() {
       }
     });
   });
-  appEl.querySelectorAll("[data-reply-comment]").forEach(function(btn) {
+  root.querySelectorAll("[data-reply-comment]").forEach(function(btn) {
     btn.addEventListener("click", function() {
       var parts = btn.getAttribute("data-reply-comment").split(":");
       var cmts = getComments(parts[0]);
@@ -10747,10 +10749,10 @@ function bindCommentEvents() {
       if (input) input.focus();
     });
   });
-  appEl.querySelectorAll("[data-cancel-reply]").forEach(function(btn) {
+  root.querySelectorAll("[data-cancel-reply]").forEach(function(btn) {
     btn.addEventListener("click", function() { state.replyTarget = null; render(); });
   });
-  appEl.querySelectorAll("[data-report-comment]").forEach(function(btn) {
+  root.querySelectorAll("[data-report-comment]").forEach(function(btn) {
     btn.addEventListener("click", function() {
       var parts = btn.getAttribute("data-report-comment").split(":");
       var pid = parts[0], commentId = parts[1];
@@ -10764,7 +10766,7 @@ function bindCommentEvents() {
       }
     });
   });
-  appEl.querySelectorAll("[data-delete-comment]").forEach(function(btn) {
+  root.querySelectorAll("[data-delete-comment]").forEach(function(btn) {
     btn.addEventListener("click", function() {
       var parts = btn.getAttribute("data-delete-comment").split(":");
       var pid = parts[0], commentId = parts[1];
@@ -10783,7 +10785,7 @@ function bindCommentEvents() {
   });
 
   // ✅ Long-press no comentário: abre menu com opção de bloquear o usuário
-  appEl.querySelectorAll("[data-comment-longpress]").forEach(function(row) {
+  root.querySelectorAll("[data-comment-longpress]").forEach(function(row) {
     var longpressTimer = null;
     var isLongpress = false;
 
@@ -17103,11 +17105,14 @@ function bindCreatePost() {
       FB.createPost(newPost);
       var wasAd = compose.isAd;
 
-      // FIX: antes, fechar o composer e trocar de página aconteciam no mesmo
-      // render() — a tela inteira (overlay + feed) era destruída e reconstruída
-      // de uma vez, o que aparecia como um "flash" na tela. Agora damos um
-      // fade-out rápido no overlay do composer ANTES de trocar o estado, então
-      // a transição fica suave em vez de um corte abrupto.
+      // FIX: fechar o composer e voltar pro feed com um render() completo
+      // reconstruía a tela inteira — inclusive todo vídeo/áudio que já
+      // estava tocando em outras publicações, recriando as tags <video>/
+      // <audio> do zero. Isso fazia a tela inteira "piscar" ao publicar.
+      // Quando o feed já está renderizado por baixo do composer (o caso
+      // normal), agora só removemos o overlay e inserimos a nova
+      // publicação no topo do feed já existente — o resto da tela nem é
+      // tocado, então nada recarrega.
       var overlayEl = appEl.querySelector(".create-overlay");
       function finishPublish() {
         state.creating = false;
@@ -17116,7 +17121,25 @@ function bindCreatePost() {
         state.postDetailId = null;
         compose = { media:null, mediaType:null, loc:null, audioMeta:null, isAd:false, adVisible:false, commentsEnabled:true, adPlaces:{ feed:true, profile:true, search:true, banner:false, stories:false, vibes:false } };
         state.page = "feed";
-        render();
+        var feedList = appEl.querySelector("[data-feed-posts]");
+        if (feedList) {
+          if (overlayEl && overlayEl.parentNode) overlayEl.parentNode.removeChild(overlayEl);
+          var wrap = document.createElement("div");
+          wrap.innerHTML = renderPostCard(newPost);
+          var newCardEl = wrap.firstElementChild;
+          feedList.insertBefore(newCardEl, feedList.firstChild);
+          bindPostCardEvents(newCardEl);
+          // Publicação com vídeo: inicializa o player só dela (sem chamar
+          // bindMimiPlayers() geral, que destrói e recria TODOS os players
+          // já ativos no feed, cortando qualquer vídeo em reprodução).
+          var videoWrap = newCardEl.querySelector('[id^="player-"]');
+          if (videoWrap && videoWrap.dataset.initialized !== 'true') {
+            _activeVideoPlayers.push(new AdvancedVideoPlayer(videoWrap.id));
+            videoWrap.dataset.initialized = 'true';
+          }
+        } else {
+          render();
+        }
         window.scrollTo(0,0);
         showToast(toastWithIcon(wasAd ? "Anúncio publicado!" : "Publicado!", "success"), true);
       }
