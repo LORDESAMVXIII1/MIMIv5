@@ -3846,7 +3846,7 @@ function loadPostsWithRetryAndRerender(onSuccessExtra) {
   clearTimeout(_loadPostsBgRetryTimer);
   retryPromise(function(){ return FB.loadPosts(); }, 4, 2000)
     .then(function(){
-      backgroundRender();
+      renderSoon();
       if (typeof onSuccessExtra === "function") onSuccessExtra();
     })
     .catch(function(err){
@@ -6302,6 +6302,25 @@ function pollGuard(fn) {
 // primeiros segundos vários caíam no mesmo instante (e em cima de um toque).
 // Com jitter, cada um entra num "fuso" diferente desde o começo.
 function jitterMs(base) { return base + Math.floor(Math.random() * Math.min(4000, base * 0.5)); }
+// FIX (tela piscando ao carregar o app): no boot, cada carregamento que
+// chegava do Firestore (perfil, posts, stories, conversas, notificações,
+// seguidores) chamava render() por conta própria. Como render() reconstrói
+// appEl.innerHTML inteiro, eram 4-6 reconstruções da tela em poucos
+// segundos — exatamente a "piscada" que só parava depois que tudo chegava
+// (por isso trocar de aba e voltar "resolvia"). Agora todos esses pedidos
+// passam por renderSoon(): eles são agrupados numa janela de 450ms e viram
+// UM render só. Se mais respostas chegarem depois, a janela reabre, mas
+// nunca há duas reconstruções em sequência imediata.
+var _renderSoonTimer = null;
+function renderSoon(delay) {
+  if (_renderSoonTimer) clearTimeout(_renderSoonTimer);
+  _renderSoonTimer = setTimeout(function() {
+    _renderSoonTimer = null;
+    // Não atropela quem está digitando, animando o sheet, em chamada etc.:
+    // backgroundRender() já conhece todas essas guardas.
+    backgroundRender();
+  }, delay || 450);
+}
 var _letterViewOpen = false; // true enquanto o modal da carta de amor está aberto
 var _chatAudioPlayingId = null; // id da mensagem de áudio tocando agora no chat (ou null)
 var _chatAudioSafetyTimer = null; // rede de segurança: nunca deixa o guard travado pra sempre
@@ -17896,7 +17915,7 @@ function onAuthSuccess(u) {
   // ── Seguidores: conserta o campo `followers` a partir da subcoleção
   // followerRefs (fonte de verdade) toda vez que eu autentico — ver
   // comentário em syncMyFollowersFromRefs().
-  syncMyFollowersFromRefs().then(function(){ backgroundRender(); });
+  syncMyFollowersFromRefs().then(function(){ renderSoon(); });
 
   // ── Posts reais do Firestore ──
   // FIX: ver comentário em loadPostsWithRetryAndRerender() — evita que o
@@ -17906,11 +17925,11 @@ function onAuthSuccess(u) {
   // (loadPosts só substitui se houver posts no Firestore)
 
   // ── Stories reais do Firestore (evita que somam ao recarregar) ─
-  retryPromise(function(){ return FB.loadStories(); }, 1, 1500).then(function(){ backgroundRender(); }).catch(function(){});
+  retryPromise(function(){ return FB.loadStories(); }, 1, 1500).then(function(){ renderSoon(); }).catch(function(){});
 
   // ── Conversas ────────────────────────────────────────
   retryPromise(function(){ return FB.loadConvos(); }, 1, 1500).then(function(){
-    backgroundRender(); checkOnlineStatus(CONVOS);
+    renderSoon(); checkOnlineStatus(CONVOS);
     runMessageCleanup(); // 1ª limpeza de mensagens com +3 dias, já com as conversas carregadas
   }).catch(function(){});
   startMessageCleanupSchedule(); // repete a cada 1h enquanto o app estiver aberto
@@ -17945,7 +17964,7 @@ function onAuthSuccess(u) {
       }
     });
     _lastNotifCheck = new Date().toISOString();
-    backgroundRender();
+    renderSoon();
   }).catch(function(){});
   startNotifPolling();
   startCallPolling();
@@ -18994,7 +19013,7 @@ function checkAgeVerificationLinkFromUrl() {
         // ── Seguidores: conserta o campo `followers` a partir da
         // subcoleção followerRefs (fonte de verdade) toda vez que a
         // sessão é restaurada — ver comentário em syncMyFollowersFromRefs().
-        syncMyFollowersFromRefs().then(function(){ backgroundRender(); });
+        syncMyFollowersFromRefs().then(function(){ renderSoon(); });
 
         // Tenta sincronizar com o Firebase qualquer escrita que ficou
         // pendente no Supabase (ex.: de uma sessão anterior sem conexão),
@@ -19010,12 +19029,12 @@ function checkAgeVerificationLinkFromUrl() {
 
         // ── 1b. Stories do Firestore (evita que somam ao recarregar) ──
         retryPromise(function(){ return FB.loadStories(); }, 1, 1500).then(function(){
-          render();
+          renderSoon();
         }).catch(function(){});
 
         // ── 2. Conversas ─────────────────────────────────────
         retryPromise(function(){ return FB.loadConvos(); }, 1, 1500).then(function(){
-          render(); checkOnlineStatus(CONVOS);
+          renderSoon(); checkOnlineStatus(CONVOS);
           runMessageCleanup(); // 1ª limpeza de mensagens com +3 dias, já com as conversas carregadas
         }).catch(function(){});
         startMessageCleanupSchedule(); // repete a cada 1h enquanto o app estiver aberto
@@ -19051,7 +19070,7 @@ function checkAgeVerificationLinkFromUrl() {
             }
           });
           _lastNotifCheck = new Date().toISOString();
-          render();
+          renderSoon();
         }).catch(function(){});
 
         // ── 5. Polling de notificações ────────────────────────
