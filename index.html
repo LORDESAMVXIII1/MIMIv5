@@ -8545,8 +8545,19 @@ function bindGlobalHandlers() {
   });
   var newPostBtn = appEl.querySelector("[data-new-post]");
   if (newPostBtn) newPostBtn.addEventListener("click", function() {
+    // FIX: chamar render() aqui reconstruía a tela inteira (appEl.innerHTML
+    // inteiro é refeito), o que destrói e recria TODOS os vídeos que
+    // estavam tocando no feed (bindMimiPlayers() derruba e reinicia todo
+    // mundo a cada render(), sem exceção) — isso fazia a tela inteira
+    // "piscar" por alguns segundos, só de abrir o menu de publicar, enquanto
+    // os vídeos recarregavam. Como o menu é só um overlay por cima do que
+    // já está na tela, agora ele é inserido direto no DOM, sem tocar em
+    // mais nada.
     state.publishMenu = true;
-    render();
+    var _wrap = document.createElement("div");
+    _wrap.innerHTML = renderPublishMenu();
+    appEl.appendChild(_wrap.firstElementChild);
+    bindPublishMenu();
   });
   // DIAGNÓSTICO NO CELULAR: 5 toques rápidos (menos de 3s) no logo "MIMI"
   // do topo mostram um alert() com o status do Supabase (fs-gateway), da
@@ -16570,8 +16581,12 @@ function renderPublishMenu() {
 function bindPublishMenu() {
   var overlay = appEl.querySelector("[data-close-publish-menu]");
   if (overlay) overlay.addEventListener("click", function() {
+    // FIX: mesma lógica do fix acima — fechar com render() completo
+    // recriava o feed e derrubava os vídeos tocando. Como o menu foi
+    // inserido direto no DOM (sem render()), fechá-lo também é só
+    // remover o próprio elemento do DOM.
     state.publishMenu = false;
-    render();
+    if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
   });
   var sheet = appEl.querySelector("[data-publish-sheet]");
   if (sheet) sheet.addEventListener("click", function(e) { e.stopPropagation(); });
