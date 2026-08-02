@@ -5396,7 +5396,14 @@ var FB = {
         d.createdAt = d.createdAt || d.time || "";
         return d;
       });
-      fsPosts.sort(function(a,b){ return (b.createdAt||"").localeCompare(a.createdAt||""); });
+      // Mesma lógica de ordenação já usada em VibesModule.loadUserVibes()
+      // (mais curtidas primeiro). Empate (mesmo número de curtidas,
+      // inclusive 0) é resolvido pelo mais recente primeiro.
+      fsPosts.sort(function(a,b){
+        var byLikes = (b.likedBy||[]).length - (a.likedBy||[]).length;
+        if (byLikes !== 0) return byLikes;
+        return (b.createdAt||"").localeCompare(a.createdAt||"");
+      });
       // FIX: Remover apenas posts do usuário genérico "usuario"
       posts = fsPosts.filter(function(p) { 
         return p.authorId && p.authorId !== "usuario";
