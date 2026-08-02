@@ -11243,11 +11243,11 @@ function bindConfirmDialog() {
 // visual da tela de assinatura (fundo escuro em degradê, anel dourado/roxo
 // com a coroa, sparkles animados) só que compacta, como um modal. Chamado
 // via state.paywallDialog = { icon, title, text, confirmLabel }.
-function renderPaywallDialog() {
+function renderPaywallDialog(lightweight) {
   var d = state.paywallDialog;
   if (!d) return "";
   var icon = d.icon || "crown";
-  return '<div class="paywall-overlay fade-in" data-paywall-overlay>' +
+  return '<div class="paywall-overlay fade-in" data-paywall-overlay'+(lightweight ? ' data-paywall-lightweight="1"' : '')+'>' +
     '<div class="paywall-box">' +
       '<button class="paywall-close" data-paywall-cancel aria-label="Fechar">'+icoSvg("close",16,"rgba(255,255,255,.55)")+'</button>' +
       '<div class="paywall-spark tw" style="top:14%;left:16%;width:3px;height:3px;"></div>' +
@@ -11264,16 +11264,27 @@ function renderPaywallDialog() {
 }
 function bindPaywallDialog() {
   var overlay = appEl.querySelector("[data-paywall-overlay]");
+  // FIX vídeo preto nas Vibes: fechar o aviso chamava render() cheio, que
+  // recria o <video> da vibe do zero (mesma causa raiz já conhecida do
+  // feed de posts). Um overlay "leve" (aberto via renderPaywallDialog(true),
+  // sem passar por render()) se fecha removendo só a si mesmo do DOM.
+  var lightweight = !!(overlay && overlay.hasAttribute("data-paywall-lightweight"));
+  function closePaywall() {
+    state.paywallDialog = null;
+    if (lightweight && overlay) { overlay.remove(); }
+    else { render(); }
+  }
   appEl.querySelectorAll("[data-paywall-cancel]").forEach(function(btn) {
-    btn.addEventListener("click", function() { state.paywallDialog = null; render(); });
+    btn.addEventListener("click", closePaywall);
   });
   if (overlay) overlay.addEventListener("click", function(e) {
-    if (e.target === overlay) { state.paywallDialog = null; render(); }
+    if (e.target === overlay) closePaywall();
   });
   var okBtn = appEl.querySelector("[data-paywall-ok]");
   if (okBtn) okBtn.addEventListener("click", function() {
     var d = state.paywallDialog;
     state.paywallDialog = null;
+    if (lightweight && overlay) overlay.remove();
     if (d && d.onConfirm) d.onConfirm();
     render();
   });
@@ -19252,6 +19263,16 @@ console.log("🔧 Cloud Name:", window.CLOUDINARY_CLOUD_NAME || "mimi-app");
 // ═════════════════════════════════════════════════════════════════
 // ✅ VIBES MODULE — Integração da aba de Vibes no MIMI app
 // ═════════════════════════════════════════════════════════════════
+// Fila de escrita do fogo (🔥) por vibe — precisa viver FORA de bindEvents().
+// bindEvents() roda de novo a cada render() (curtir, comentar, polling de
+// notificações etc. — ver o wrapper de render() logo abaixo, que já
+// documenta isso). Se essa fila fosse recriada a cada bindEvents(), uma
+// re-renderização no meio de vários toques rápidos no fogo fazia a próxima
+// escrita "esquecer" de esperar a anterior terminar — as duas saíam em
+// paralelo e quem respondesse por último sobrescrevia o total, mesmo que
+// fosse um número mais baixo. Total errado, sem erro nenhum no console.
+var _vibeFireWriteChain = {};
+
 var VibesModule = {
   vibes: [],
   vibesByUser: {}, // { userId: [vibe1, vibe2, ...] }
@@ -19503,7 +19524,6 @@ var VibesModule = {
     // Botão de fogo (🔥 roxo/lilás) — reação exclusiva das Vibes, com fila
     // de escrita e trava anti-clique-duplicado no mesmo espírito do Feed,
     // mas totalmente isolada (vibe.fireTotal, chave própria de daily-limit).
-    var _vibeFireWriteChain = {};
     function queueVibeFireWrite(vid, newTotal) {
       var prev = _vibeFireWriteChain[vid] || Promise.resolve();
       var next = prev.catch(function(){}).then(function(){ return FB.fireVibe(vid, newTotal); });
@@ -19529,7 +19549,10 @@ var VibesModule = {
             confirmLabel: "Assinar MIMI Plus",
             onConfirm: function() { state.subsOpen = true; }
           };
-          render();
+          // Injeta o aviso direto no DOM (sem render() completo) pra não
+          // recriar o <video> da vibe atual — ver bindPaywallDialog().
+          appEl.insertAdjacentHTML("beforeend", renderPaywallDialog(true));
+          bindPaywallDialog();
           return;
         }
         var entry = getMyVibeFireToday(vibe);
