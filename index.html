@@ -6277,6 +6277,7 @@ function _isTextFieldEl(el) {
 }
 var _isTypingInField = false;
 var _pendingBackgroundRender = false;
+var _publishSheetAnimating = false; // true durante os ~220ms da animação de abrir o menu "+Publicar" — evita que um poll de fundo compita pela thread com a animação
 var _letterViewOpen = false; // true enquanto o modal da carta de amor está aberto
 var _chatAudioPlayingId = null; // id da mensagem de áudio tocando agora no chat (ou null)
 var _chatAudioSafetyTimer = null; // rede de segurança: nunca deixa o guard travado pra sempre
@@ -6339,6 +6340,12 @@ function _isChatComposeActive() {
 // Chamar isto em vez de render() direto em qualquer atualização "de fundo"
 // (que não é uma resposta direta a uma ação do usuário nesse instante).
 function backgroundRender() {
+  // FIX (tremor ao abrir "+Publicar"): um poll de fundo (lista de conversas,
+  // reações, stories, notificações) podia cair bem no meio dos ~220ms da
+  // animação de abrir o sheet, competindo pela thread principal e fazendo o
+  // menu tremer. Enquanto essa animação está rodando, o backgroundRender()
+  // fica pendente e só roda logo depois que ela termina.
+  if (_publishSheetAnimating) { _pendingBackgroundRender = true; return; }
   if (_isTypingInField || _isChatComposeActive()) { _pendingBackgroundRender = true; return; }
   // Enquanto a pessoa está em Vibes assistindo um vídeo, reconstruir a tela
   // inteira (o que a função render() sempre faz) destrói e recria o <video>
@@ -8566,6 +8573,16 @@ function bindGlobalHandlers() {
     _wrap.innerHTML = renderPublishMenu();
     appEl.appendChild(_wrap.firstElementChild);
     bindPublishMenu();
+    // FIX (tremor ao abrir "+Publicar"): trava o backgroundRender() de fundo
+    // pelos ~220ms da animação (mesma duração do CSS .publish-menu-sheet),
+    // mais uma pequena margem, pra nenhum poll competir com o frame da
+    // animação. Ao final, libera e roda de uma vez só qualquer atualização
+    // que tenha ficado pendente nesse meio-tempo.
+    _publishSheetAnimating = true;
+    setTimeout(function() {
+      _publishSheetAnimating = false;
+      if (_pendingBackgroundRender) { _pendingBackgroundRender = false; backgroundRender(); }
+    }, 260);
   });
   // DIAGNÓSTICO NO CELULAR: 5 toques rápidos (menos de 3s) no logo "MIMI"
   // do topo mostram um alert() com o status do Supabase (fs-gateway), da
