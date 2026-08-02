@@ -6321,6 +6321,26 @@ function renderSoon(delay) {
     backgroundRender();
   }, delay || 450);
 }
+// Uma renderização do Feed pode descobrir vários autores que ainda não estão
+// no cache. Sem marcar a busca como "em andamento", cada reconstrução iniciava
+// outra requisição para o mesmo perfil; quando elas voltavam, cada resposta
+// chamava render() novamente e criava o ciclo visual de piscar/travar.
+var _userFetchPending = Object.create(null);
+var _userFetchTried = Object.create(null);
+function fetchUserOnce(uid, onLoaded) {
+  if (!uid || USERS[uid] || !_idToken || _userFetchPending[uid] || _userFetchTried[uid]) return;
+  _userFetchPending[uid] = true;
+  fsGet("users/" + uid).then(function(u) {
+    if (!u) return;
+    delete u._id;
+    u.uid = uid;
+    USERS[uid] = u;
+    if (typeof onLoaded === "function") onLoaded(u);
+  }).catch(function(){}).then(function() {
+    delete _userFetchPending[uid];
+    _userFetchTried[uid] = true;
+  });
+}
 var _letterViewOpen = false; // true enquanto o modal da carta de amor está aberto
 var _chatAudioPlayingId = null; // id da mensagem de áudio tocando agora no chat (ou null)
 var _chatAudioSafetyTimer = null; // rede de segurança: nunca deixa o guard travado pra sempre
@@ -10325,9 +10345,10 @@ function renderFeedPage() {
   if (_idToken) {
     posts.forEach(function(p) {
       if (!USERS[p.authorId]) {
-        fsGet("users/" + p.authorId).then(function(u) {
-          if (u) { delete u._id; u.uid = p.authorId; USERS[p.authorId] = u; render(); }
-        }).catch(function(){});
+        // Nunca chama render() direto daqui. renderFeedPage() faz parte do
+        // próprio render; fazer cada perfil carregado reconstruir o app inteiro
+        // gerava uma cascata (e buscas duplicadas) justamente no primeiro load.
+        fetchUserOnce(p.authorId, function() { backgroundRender(); });
       }
     });
   }
@@ -19418,15 +19439,11 @@ var VibesModule = {
   // ele ainda não está em USERS, e re-renderiza assim que chegar.
   fetchMissingUser: function(uid) {
     if (!uid || USERS[uid] || !_idToken) return;
-    var self = this;
-    fsGet("users/" + uid).then(function(u) {
-      if (u) {
-        delete u._id;
-        u.uid = uid;
-        USERS[uid] = u;
-        if (state.page === "vibes") render();
-      }
-    }).catch(function(){});
+    fetchUserOnce(uid, function() {
+      // Em Vibes, não destrói o vídeo/slide atual só para trocar avatar/nome.
+      // Os dados entram no cache e aparecem na próxima navegação normal.
+      backgroundRender();
+    });
   },
 
   // Anúncio renderizado como um slide de Vibe (sem fogo e sem download).
