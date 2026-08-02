@@ -10177,7 +10177,7 @@ function renderPostCard(post, opts) {
   var fired = postMyFireCount(post) > 0;
   var commentCount = getComments(post.id).length;
 
-  return '<div class="post-card'+(post.isAd?' post-card-ad':'')+'" data-post-id="'+post.id+'"'+(post.isAd?' style="border:2px solid #1abc9c;border-radius:16px;background:linear-gradient(180deg,rgba(26,188,156,.07),transparent 45%);box-shadow:0 4px 18px rgba(26,188,156,.22);"':'')+'>' +
+  return '<div class="post-card" data-post-id="'+post.id+'">' +
     '<div class="post-head">' +
       '<div data-open-author="'+post.authorId+'" style="cursor:pointer;">'+avatarHtml(author.avatar, 42, false, false, false, null, null, getUserFrame(author))+'</div>' +
       '<div class="grow" data-open-author="'+post.authorId+'" style="cursor:pointer;">' +
@@ -10190,7 +10190,7 @@ function renderPostCard(post, opts) {
           '<span class="post-sub">·</span>' +
           '<span class="post-sub">'+esc(post.time)+'</span>' +
         '</div>' +
-        (post.isAd ? '<div class="post-ad-label" style="display:inline-flex;align-items:center;gap:5px;margin-top:4px;padding:4px 12px;border-radius:20px;background:#1abc9c;color:#fff;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;box-shadow:0 2px 6px rgba(26,188,156,.4);">'+icoSvg("megaphone",13,"#fff",true)+' Anúncio</div>' : "") +
+        (post.isAd ? '<div class="post-ad-label" style="display:inline-flex;align-items:center;gap:3px;margin-top:3px;padding:2px 8px;border-radius:20px;background:#e9fbf3;color:#1abc9c;font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;">'+icoSvg("megaphone",11,"#1abc9c",true)+' Anúncio</div>' : "") +
       '</div>' +
       '<button class="icon-btn" data-open-sheet="'+post.id+'" style="color:var(--muted);">'+icoSvg("more",20)+'</button>' +
     '</div>' +
