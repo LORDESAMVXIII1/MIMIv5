@@ -10235,6 +10235,11 @@ function renderCommentItem(pid, c, allCmts, isPostOwner, depth) {
 }
 
 // ─── FEED PAGE ───────────────────────────────────────────────
+// Publicações de música: congeladas a pedido do usuário — o botão de
+// anexar áudio some do composer e posts de música (existentes ou não)
+// não aparecem mais no Feed. Pra reativar no futuro, basta voltar isto
+// pra "true".
+var FEED_MUSIC_POSTS_ENABLED = false;
 function renderFeedPage() {
   // Carrega autores desconhecidos do Firebase em background
   if (_idToken) {
@@ -10257,7 +10262,7 @@ function renderFeedPage() {
   '</div>' +
   '<div style="background:var(--surface);border-bottom:1px solid var(--border);padding-top:12px;">' + renderStories() + '</div>' +
   '<div>';
-  var _feedOrdered = getFeedOrder(posts);
+  var _feedOrdered = getFeedOrder(posts).filter(function(p) { return FEED_MUSIC_POSTS_ENABLED || !p.audio; });
   var _feedSlice = _feedOrdered.slice(0, state.feedRenderLimit);
   _feedSlice.forEach(function(p) { html += renderPostCard(p); });
   html += '</div>';
@@ -15206,7 +15211,9 @@ function renderProfilePage(userId) {
   var u = USERS[userId];
   if (!u) return '<div class="search-empty">Perfil não encontrado.</div>';
   var isMe = userId === ME_ID;
-  var tabs = isMe ? ["posts","músicas","mídia","curtidas","salvos"] : ["posts","músicas","mídia","curtidas"];
+  var tabs = FEED_MUSIC_POSTS_ENABLED
+    ? (isMe ? ["posts","músicas","mídia","curtidas","salvos"] : ["posts","músicas","mídia","curtidas"])
+    : (isMe ? ["posts","mídia","curtidas","salvos"] : ["posts","mídia","curtidas"]);
   if (!tabs.indexOf || tabs.indexOf(profileTab) === -1) profileTab = "posts";
 
   var isCoverVideo = !!(u.cover && u.coverType === "video");
@@ -16890,7 +16897,7 @@ function renderCreatePost() {
     '<div class="create-toolbar">' +
       '<button class="create-tool-btn" data-pick-media="image" title="Foto">'+icoSvg("img",22,C.accent)+'</button>' +
       '<button class="create-tool-btn" data-pick-media="video" title="Vídeo">'+icoSvg("video",22,C.accent)+'</button>' +
-      (compose.isAd ? "" : '<button class="create-tool-btn" data-pick-media="audio" title="Áudio">'+icoSvg("music",22,C.accent)+'</button>') +
+      (compose.isAd || !FEED_MUSIC_POSTS_ENABLED ? "" : '<button class="create-tool-btn" data-pick-media="audio" title="Áudio">'+icoSvg("music",22,C.accent)+'</button>') +
       '<button class="create-tool-btn" data-pick-emoji title="Emoji">'+icoSvg("emoji",22,C.accent)+'</button>' +
       (compose.isAd ? "" : '<button class="create-tool-btn" data-pick-loc title="Local">'+icoSvg("loc",22,C.accent)+'</button>') +
       '<input type="file" data-create-file-input class="hidden">' +
