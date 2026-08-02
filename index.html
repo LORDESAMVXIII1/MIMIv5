@@ -442,6 +442,12 @@
   .convo-last { margin:0; font-size:13px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .convo-last.unread { color:var(--sub); font-weight:600; }
   .convo-unread-badge { background:var(--accent); color:#fff; font-size:11px; font-weight:700; border-radius:20px; padding:2px 7px; min-width:20px; text-align:center; flex-shrink:0; }
+  .convo-section-label { display:flex; align-items:center; gap:6px; padding:16px 16px 8px; color:var(--accent); font-size:12px; font-weight:800; letter-spacing:.6px; text-transform:uppercase; cursor:default; }
+  .convo-section-label[data-toggle-archived] { cursor:pointer; }
+  .convo-pinned-wrap { margin:0 16px 6px; border:1px solid var(--border); border-radius:18px; overflow:hidden; background:var(--card); box-shadow:0 2px 10px rgba(0,0,0,0.06); }
+  .convo-pinned-wrap .convo-row { border-bottom:1px solid var(--border); }
+  .convo-pinned-wrap .convo-row:last-child { border-bottom:none; }
+  .convo-pinned-wrap .convo-row:hover { background:transparent; }
 
   /* ── Modal de confirmação de apagar ────────────────────── */
   .delete-modal { position:fixed; inset:0; background:rgba(0,0,0,.6); display:flex; align-items:flex-end; z-index:1000; animation:fadeIn 0.2s ease; }
@@ -11649,19 +11655,19 @@ function renderMsgsPage() {
     '</div>';
   }
 
-  // ✅ Renderizar conversas fixadas
+  // ✅ Renderizar conversas fixadas (em cartão destacado)
   if (pinnedConvos.length > 0) {
-    html += '<div style="padding:12px 16px 8px; color:var(--muted); font-size:12px; font-weight:700; letter-spacing:.5px; text-transform:uppercase;">Fixadas</div>';
+    html += '<div class="convo-section-label">'+icoSvg("pinFill",13,"var(--accent)",true)+'Fixadas</div>';
+    html += '<div class="convo-pinned-wrap">';
     pinnedConvos.forEach(function(c) {
-      html += renderConvoRow(c);
+      html += renderConvoRow(c, true);
     });
+    html += '</div>';
   }
 
   // ✅ Renderizar conversas ativas
   if (activeConvos.length > 0) {
-    if (pinnedConvos.length > 0) {
-      html += '<div style="padding:12px 16px 8px; color:var(--muted); font-size:12px; font-weight:700; letter-spacing:.5px; text-transform:uppercase; margin-top:8px;">Conversas</div>';
-    }
+    html += '<div class="convo-section-label">'+icoSvg("msg",13,"var(--accent)")+'Conversas</div>';
     activeConvos.forEach(function(c) {
       html += renderConvoRow(c);
     });
@@ -11669,7 +11675,7 @@ function renderMsgsPage() {
 
   // ✅ Renderizar conversas arquivadas (colapsável)
   if (archivedConvos.length > 0) {
-    html += '<div style="padding:12px 16px 8px; color:var(--muted); font-size:12px; font-weight:700; letter-spacing:.5px; text-transform:uppercase; margin-top:8px; cursor:pointer;" data-toggle-archived>' +
+    html += '<div class="convo-section-label" data-toggle-archived>' +
       'Arquivadas (' + archivedConvos.length + ')' +
     '</div>';
     if (!state.hideArchived) {
@@ -11699,7 +11705,7 @@ function renderConvoLastPreview(text) {
   return '<span style="display:inline-flex;align-items:center;gap:4px;vertical-align:middle;">'+icoSvg(m[0],13,"var(--muted)")+esc(m[1])+'</span>';
 }
 
-function renderConvoRow(c) {
+function renderConvoRow(c, insideCard) {
   var u = USERS[c.userId] || { name: c.userId, username: "", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed="+c.userId };
   
   return '<div class="convo-row" data-open-convo="'+c.id+'" data-convo-id="'+c.id+'" data-convo-longpress="'+c.id+'">' +
@@ -11707,7 +11713,7 @@ function renderConvoRow(c) {
     '<div class="grow" style="overflow:hidden;">' +
       '<div class="convo-name-row">' +
         '<span style="font-weight:700;font-size:14px;">'+esc(u.name)+'</span>' +
-        (c.pinned ? '<span style="font-size:11px;margin-left:6px;color:var(--accent);display:inline-flex;align-items:center;gap:3px;vertical-align:middle;">'+icoSvg("pinFill",11,C.accent,true)+'Fixada</span>' : '') +
+        (c.pinned && !insideCard ? '<span style="font-size:11px;margin-left:6px;color:var(--accent);display:inline-flex;align-items:center;gap:3px;vertical-align:middle;">'+icoSvg("pinFill",11,C.accent,true)+'Fixada</span>' : '') +
         '<span style="font-size:11px;color:var(--muted); margin-left:auto;">'+esc(c.time)+'</span>' +
       '</div>' +
       '<p class="convo-last '+(c.unread?"unread":"")+'">'+renderConvoLastPreview(c.last)+'</p>' +
