@@ -1271,10 +1271,6 @@
   .track-wave-bar.played { background:rgb(var(--tp-rgb,255,111,165)); box-shadow:0 0 5px rgba(var(--tp-rgb,255,111,165),.55); }
   .track-player-right { display:flex; flex-direction:column; align-items:center; gap:6px; flex-shrink:0; }
   .track-player-time { font-size:10.5px; font-weight:700; color:rgba(255,255,255,.4); }
-  .track-player-heart { position:relative; background:none; border:none; cursor:pointer; color:rgba(255,255,255,.32); flex-shrink:0; display:flex; align-items:center; justify-content:center; padding:0; }
-  .track-player-heart.active { color:rgb(var(--tp-rgb,255,111,165)); }
-  .track-player-heart svg { transition:transform .25s cubic-bezier(.3,1.5,.4,1); }
-  .track-player-heart.active svg { transform:scale(1.15); }
 
   /* Editor de trecho (trim) de áudio no compositor de post */
   .audio-trim { margin-top:12px; }
@@ -9876,12 +9872,11 @@ function renderTrackPlayer(post) {
   var waveHtml = bars.map(function(hgt, i) {
     return '<div class="track-wave-bar" data-wave-bar="'+i+'" style="height:'+Math.round(hgt*0.55)+'px;"></div>';
   }).join("");
-  var favActive = !!pam.favorited;
   // Estilo "mini bolha": card compacto tipo mensagem de voz, com a
   // waveform servindo tanto de visualização quanto de barra de busca
   // (data-track-wave e data-track-seek no mesmo elemento).
   return (
-    '<div class="track-player" data-track-player="'+post.id+'" style="--tp-rgb:'+TP_DEFAULT_RGB+';">' +
+    '<div class="track-player" data-track-player="'+post.id+'" data-track-artwork="'+esc(pam.artwork||"")+'" style="--tp-rgb:'+TP_DEFAULT_RGB+';">' +
       '<button class="track-player-play" data-track-play="'+post.id+'" title="Reproduzir">'+icoSvg("play",17,"currentColor",true)+'</button>' +
       '<div class="track-player-mid">' +
         '<div class="track-player-title">'+esc(pam.title||"Faixa de áudio")+'</div>' +
@@ -9890,7 +9885,6 @@ function renderTrackPlayer(post) {
       '</div>' +
       '<div class="track-player-right">' +
         '<span class="track-player-time" data-track-cur="'+post.id+'">0:00</span>' +
-        '<button class="track-player-heart '+(favActive?"active":"")+'" data-track-fav="'+post.id+'" title="Favoritar">'+icoSvg("heart",15,"currentColor",favActive)+'</button>' +
       '</div>' +
       '<audio data-track-audio="'+post.id+'" src="'+esc(post.audio)+'" preload="auto" muted></audio>' +
     '</div>'
@@ -9909,13 +9903,21 @@ function bindTrackPlayers() {
     var pid = box.getAttribute("data-track-player");
     var audio = box.querySelector('[data-track-audio="'+pid+'"]');
     var playBtn = box.querySelector('[data-track-play="'+pid+'"]');
-    var favBtn = box.querySelector('[data-track-fav="'+pid+'"]');
     var seek = box.querySelector('[data-track-seek="'+pid+'"]');
     var curEl = box.querySelector('[data-track-cur="'+pid+'"]');
     var waveBars = box.querySelectorAll('[data-track-wave="'+pid+'"] .track-wave-bar');
 
     if (!audio || audio._trackBound) return;
     audio._trackBound = true;
+
+    // Cor da faixa: extrai a cor dominante da capa (quando houver) e
+    // aplica no --tp-rgb do player; sem capa/erro, fica no rosa padrão.
+    var artworkUrl = box.getAttribute("data-track-artwork");
+    if (artworkUrl) {
+      tpAccentFromArtwork(artworkUrl, function(rgb) {
+        if (rgb) box.style.setProperty("--tp-rgb", rgb.r+","+rgb.g+","+rgb.b);
+      });
+    }
 
     // Trecho escolhido pelo autor ao publicar (ver renderAudioTrimEditor).
     // Posts antigos não têm isso — nesse caso toca a prévia inteira, igual
@@ -9968,33 +9970,32 @@ function bindTrackPlayers() {
       }
     });
     // Autoplay mudo ao rolar o feed — igual o vídeo já faz. A pessoa decide
-    // se quer ouvir apertando o play (acima) ou o botão de som (abaixo).
+    // se quer ouvir apertando o play (acima).
+    // FIX: a versão anterior nunca pausava ao sair de vista (só mudava o
+    // volume quando outra faixa era tocada manualmente). Isso fazia a
+    // música de uma publicação continuar tocando por baixo — inclusive com
+    // som, se tivesse sido "des-mutada" pelo play — enquanto a pessoa já
+    // tinha rolado pra outra publicação, sobrepondo áudios. Agora, igual ao
+    // vídeo, a faixa pausa assim que sai de vista e volta ao início do
+    // trecho escolhido, e só a publicação realmente visível pode tocar.
     if ('IntersectionObserver' in window) {
-      // FIX: NUNCA pausar automaticamente ao sair de vista. Antes, o
-      // threshold 0.6 pausava a música no meio da faixa só porque a
-      // publicação de baixo (outro vídeo/música) entrava em cena, ou
-      // porque a altura do card mudou (imagem abaixo carregando, teclado
-      // abrindo). Agora só damos play mudo quando entra em cena; quando
-      // sai, deixamos tocando (áudio ~ zero custo quando mudo) para não
-      // interromper a experiência do usuário — se ele quiser silenciar,
-      // usa o botão de som daquela publicação.
       var _tpIo = new IntersectionObserver(function(entries) {
         entries.forEach(function(entry) {
-          if (entry.isIntersecting && !hasOpenOverlay() && audio.paused) {
-            ensureStartPosition();
-            audio.play().catch(function(){});
+          if (entry.isIntersecting && !hasOpenOverlay()) {
+            if (audio.paused) {
+              ensureStartPosition();
+              audio.play().catch(function(){});
+            }
+          } else if (!audio.paused) {
+            audio.pause();
+            audio.currentTime = tStart;
+            seeked = true;
           }
         });
       }, { threshold: 0.25 });
       _tpIo.observe(box);
       _activeTrackObservers.push(_tpIo);
     }
-    if (favBtn) favBtn.addEventListener("click", function(e) {
-      e.stopPropagation();
-      var nowActive = !favBtn.classList.contains("active");
-      favBtn.classList.toggle("active", nowActive);
-      favBtn.innerHTML = icoSvg("heart", 17, "currentColor", nowActive);
-    });
     audio.addEventListener("play", function() { setPlayIcon(true); });
     audio.addEventListener("pause", function() { setPlayIcon(false); });
     // Fim do trecho escolhido (ou fim real do arquivo, se não houver trecho):
