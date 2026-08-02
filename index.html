@@ -8553,6 +8553,14 @@ function bindGlobalHandlers() {
     // os vídeos recarregavam. Como o menu é só um overlay por cima do que
     // já está na tela, agora ele é inserido direto no DOM, sem tocar em
     // mais nada.
+    // FIX (menu "subindo e descendo"): em celular, o mesmo toque às vezes
+    // dispara o evento "click" mais de uma vez (ex.: toque + o navegador
+    // reenviando o clique sintético), e cada disparo empilhava outro
+    // overlay por cima do anterior — cada um com a própria animação de
+    // deslizar de baixo pra cima, dando a impressão de o menu "pulando"
+    // repetidamente. Agora, se o menu já está aberto, um novo toque no
+    // botão é ignorado em vez de abrir outro por cima.
+    if (state.publishMenu) return;
     state.publishMenu = true;
     var _wrap = document.createElement("div");
     _wrap.innerHTML = renderPublishMenu();
