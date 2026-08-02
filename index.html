@@ -16686,15 +16686,21 @@ function publishVibeItem(videoSrc, caption) {
     fireTotal: 0,
     createdAt: Date.now()
   };
-  state.page = "vibes";
-  render();
   showToast("Publicando sua vibe…");
+  // FIX: antes chamava render() aqui (pra ir pro feed de vibes) e de novo
+  // logo depois que o Firebase confirmava a gravação — duas chamadas de
+  // render() em sequência rápida, cada uma reconstruindo a tela inteira
+  // (appEl.innerHTML) e recriando todos os vídeos do feed de vibes do
+  // zero, faziam a tela inteira "piscar" rápido ao publicar. Agora só
+  // trocamos de página e renderizamos uma vez, depois que a vibe já foi
+  // salva de verdade.
   FB.createVibe(newVibe).then(function() {
     newVibe.createdAt = Date.now(); // mantém numérico p/ ordenação local (createVibe grava ISO no Firestore)
     // FIX: antes ia sempre pro topo (unshift); agora entra na posição certa
     // pro ranking por curtidas (0 curtidas = vai pro fim, junto dos outros
     // vídeos sem engajamento ainda).
     VibesModule.vibes.push(newVibe);
+    state.page = "vibes";
     render();
     showToast("Vibe publicada! <svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"vertical-align:-3px;margin-left:4px\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M8 12.5l2.5 2.5L16 9.5\"/></svg>", true);
   }).catch(function(err) {
