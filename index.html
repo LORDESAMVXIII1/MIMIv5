@@ -1165,8 +1165,8 @@
   /* Menu de seleção do tipo de publicação (aberto pelo botão "+ Publicar") */
   .publish-menu-overlay { position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:250; display:flex; align-items:flex-end; justify-content:center; animation:publishFadeIn .18s ease; }
   @keyframes publishFadeIn { from{ opacity:0; } to{ opacity:1; } }
-  .publish-menu-sheet { width:100%; max-width:480px; background:var(--surface); border-radius:22px 22px 0 0; padding:10px 16px calc(20px + env(safe-area-inset-bottom)); animation:publishSlideUp .22s cubic-bezier(.34,1.56,.64,1); }
-  @keyframes publishSlideUp { from{ transform:translateY(24px); opacity:0; } to{ transform:translateY(0); opacity:1; } }
+  .publish-menu-sheet { width:100%; max-width:480px; background:var(--surface); border-radius:22px 22px 0 0; padding:10px 16px calc(20px + env(safe-area-inset-bottom)); animation:publishSlideUp .22s cubic-bezier(.34,1.56,.64,1) both; will-change:transform, opacity; transform:translateZ(0); backface-visibility:hidden; contain:paint; }
+  @keyframes publishSlideUp { from{ transform:translate3d(0,24px,0); opacity:0; } to{ transform:translate3d(0,0,0); opacity:1; } }
   .publish-menu-handle { width:38px; height:4px; border-radius:3px; background:var(--border); margin:6px auto 14px; }
   .publish-menu-title { font-weight:800; font-size:16px; color:var(--text); padding:0 6px 12px; }
   .publish-menu-option { width:100%; display:flex; align-items:center; gap:14px; background:none; border:none; padding:12px 6px; cursor:pointer; text-align:left; border-radius:14px; transition:background .15s; }
@@ -6278,6 +6278,30 @@ function _isTextFieldEl(el) {
 var _isTypingInField = false;
 var _pendingBackgroundRender = false;
 var _publishSheetAnimating = false; // true durante os ~220ms da animação de abrir o menu "+Publicar" — evita que um poll de fundo compita pela thread com a animação
+// FIX (tremor do sheet "+Publicar"): além de segurar o backgroundRender(),
+// seguramos o TRABALHO INTEIRO dos pollings de fundo (requisição de rede +
+// parse + diff das listas) durante a animação. Antes, mesmo sem render, um
+// tick de poll caindo no meio dos 220ms roubava a thread e fazia a animação
+// pular. Agora o tick é adiado pro fim da animação.
+var _uiAnimBusyUntil = 0;
+function markUiAnimating(ms) { _uiAnimBusyUntil = Date.now() + (ms || 300); }
+function uiAnimBusy() { return Date.now() < _uiAnimBusyUntil; }
+// Envolve o corpo de um poll: se a UI está animando, reagenda pro instante
+// seguinte ao fim da animação em vez de rodar agora.
+function pollGuard(fn) {
+  return function() {
+    if (uiAnimBusy() || _publishSheetAnimating) {
+      var wait = Math.max(60, _uiAnimBusyUntil - Date.now() + 60);
+      setTimeout(function(){ if (!uiAnimBusy() && !_publishSheetAnimating) fn(); }, wait);
+      return;
+    }
+    fn();
+  };
+}
+// Espalha o início dos pollings: todos nasciam juntos no load, então nos
+// primeiros segundos vários caíam no mesmo instante (e em cima de um toque).
+// Com jitter, cada um entra num "fuso" diferente desde o começo.
+function jitterMs(base) { return base + Math.floor(Math.random() * Math.min(4000, base * 0.5)); }
 var _letterViewOpen = false; // true enquanto o modal da carta de amor está aberto
 var _chatAudioPlayingId = null; // id da mensagem de áudio tocando agora no chat (ou null)
 var _chatAudioSafetyTimer = null; // rede de segurança: nunca deixa o guard travado pra sempre
@@ -6450,10 +6474,10 @@ var _convoListPollInterval = null;
 function startConvoListPolling() {
   stopConvoListPolling();
   if (!_idToken || !_fbUid) return;
-  _convoListPollInterval = setInterval(function() {
+  _convoListPollInterval = setInterval(pollGuard(function() {
     if (!_idToken || !_fbUid) { stopConvoListPolling(); return; }
     refreshConvoList();
-  }, 10000);
+  }), jitterMs(10000));
 }
 function stopConvoListPolling() {
   if (_convoListPollInterval) { clearInterval(_convoListPollInterval); _convoListPollInterval = null; }
@@ -6568,10 +6592,10 @@ function startPresence() {
   fsSet("users/"+_fbUid, { online: true, lastSeen: new Date().toISOString() }).catch(function(){});
   // Atualiza a cada 30s
   clearInterval(_presenceInterval);
-  _presenceInterval = setInterval(function() {
+  _presenceInterval = setInterval(pollGuard(function() {
     if (!_idToken || !_fbUid) { clearInterval(_presenceInterval); return; }
     fsSet("users/"+_fbUid, { online: true, lastSeen: new Date().toISOString() }).catch(function(){});
-  }, 30000);
+  }), jitterMs(30000));
   // Ao fechar/sair marca offline
   window.addEventListener("beforeunload", function() {
     fsSet("users/"+_fbUid, { online: false, lastSeen: new Date().toISOString() }).catch(function(){});
@@ -6980,7 +7004,7 @@ function startNotifPolling() {
   _lastNotifCheck = new Date().toISOString();
 
   // ✅ FIX 5a: Aumentar de 12s para 20s, passa _lastNotifCheck para busca incremental
-  _notifPollInterval = setInterval(function() {
+  _notifPollInterval = setInterval(pollGuard(function() {
     if (!_idToken || !_fbUid) { stopNotifPolling(); return; }
     FB.loadNotifs(_lastNotifCheck).then(function(docs) {
       if (!docs || !docs.length) return;
@@ -7052,7 +7076,7 @@ function startNotifPolling() {
       _lastNotifCheck = new Date().toISOString();
       if (changed && state.page === "notifs") backgroundRender();
     }).catch(function(){});
-  }, 20000);  // 🚀 Reduzido de 12s para 20s (4 vezes por minuto em vez de 5)
+  }), jitterMs(20000));  // 🚀 Reduzido de 12s para 20s (4 vezes por minuto em vez de 5)
 }
 
 function stopNotifPolling() {
@@ -7069,13 +7093,13 @@ function startStoryPolling() {
   stopStoryPolling();
   if (!_idToken || !_fbUid) return;
   // ✅ FIX 5b: Aumentar de 8s para 15s, passa _lastStoryCheck para busca incremental
-  _storyPollInterval = setInterval(function() {
+  _storyPollInterval = setInterval(pollGuard(function() {
     if (!_idToken || !_fbUid) { stopStoryPolling(); return; }
     FB.loadStories(_lastStoryCheck).then(function(){ 
       _lastStoryCheck = new Date().toISOString();
       backgroundRender(); 
     }).catch(function(){});
-  }, 15000);  // 🚀 Reduzido de 8s para 15s (4 vezes por minuto em vez de 7.5)
+  }), jitterMs(15000));  // 🚀 Reduzido de 8s para 15s (4 vezes por minuto em vez de 7.5)
 }
 function stopStoryPolling() {
   if (_storyPollInterval) { clearInterval(_storyPollInterval); _storyPollInterval = null; }
@@ -7097,10 +7121,10 @@ var _postsReactionPollInterval = null;
 function startPostsReactionPolling() {
   stopPostsReactionPolling();
   if (!_idToken || !_fbUid) return;
-  _postsReactionPollInterval = setInterval(function() {
+  _postsReactionPollInterval = setInterval(pollGuard(function() {
     if (!_idToken || !_fbUid) { stopPostsReactionPolling(); return; }
     syncPostsReactionsFromServer();
-  }, 15000);
+  }), jitterMs(15000));
 }
 function stopPostsReactionPolling() {
   if (_postsReactionPollInterval) { clearInterval(_postsReactionPollInterval); _postsReactionPollInterval = null; }
@@ -8579,10 +8603,11 @@ function bindGlobalHandlers() {
     // animação. Ao final, libera e roda de uma vez só qualquer atualização
     // que tenha ficado pendente nesse meio-tempo.
     _publishSheetAnimating = true;
+    markUiAnimating(340); // segura também o trabalho dos pollings de fundo
     setTimeout(function() {
       _publishSheetAnimating = false;
       if (_pendingBackgroundRender) { _pendingBackgroundRender = false; backgroundRender(); }
-    }, 260);
+    }, 340);
   });
   // DIAGNÓSTICO NO CELULAR: 5 toques rápidos (menos de 3s) no logo "MIMI"
   // do topo mostram um alert() com o status do Supabase (fs-gateway), da
