@@ -16079,7 +16079,23 @@ function bindMyAdsPage() {
       var post = posts.find(function(p){ return p.id === pid; });
       if (!post) return;
       post.adVisible = !post.adVisible;
-      render();
+      // FIX: render() inteiro recriava o overlay "fade-in" e piscava a
+      // tela toda; agora só pinta a bolinha/trilha deste switch.
+      sw.classList.toggle("active", post.adVisible);
+      sw.style.background = post.adVisible ? "#1abc9c" : "var(--border)";
+      var knob = sw.children[0];
+      if (knob) knob.style.left = post.adVisible ? "21px" : "3px";
+      var subEl = sw.parentElement && sw.parentElement.querySelector(".cfg-item-sub");
+      if (subEl) {
+        var pl = adPlacesOf(post), names = [];
+        if (pl.feed) names.push("Feed");
+        if (pl.profile) names.push("Perfil");
+        if (pl.search) names.push("Busca");
+        if (pl.stories) names.push("Stories");
+        if (pl.vibes) names.push("Vibes");
+        if (pl.banner) names.push("Banner do app");
+        subEl.textContent = post.adVisible ? (names.length ? ("Visível em: " + names.join(", ")) : "Nenhum local selecionado") : "Oculto de tudo";
+      }
       if (_idToken) fsSet("posts/"+pid, { adVisible: post.adVisible }).catch(function(err){
         console.error("Erro ao salvar visibilidade do anúncio:", err);
       });
@@ -17023,11 +17039,25 @@ function bindCreatePost() {
   var emojiBtn = appEl.querySelector("[data-pick-emoji]");
   if (emojiBtn) emojiBtn.addEventListener("click", function() { toggleEmojiPanel("create"); });
 
+  // FIX: esses toggles ficavam dentro do overlay "create-overlay fade-in".
+  // Cada clique chamava render() inteiro, que recria TODO o overlay do
+  // zero — e como a classe "fade-in" tem uma animação de opacidade, ela
+  // disparava de novo a cada clique, fazendo a tela inteira piscar.
+  // Agora o clique só atualiza o estado e a própria bolinha/trilha do
+  // switch no DOM, sem re-renderizar nada.
+  function paintSwitch(row, on, activeColor) {
+    var track = row.children[1];
+    if (!track) return;
+    track.style.background = on ? (activeColor || "#1abc9c") : "var(--border)";
+    var knob = track.children[0];
+    if (knob) knob.style.left = on ? "21px" : "3px";
+  }
+
   appEl.querySelectorAll("[data-ad-place]").forEach(function(row) {
     row.addEventListener("click", function() {
       var key = row.getAttribute("data-ad-place");
       compose.adPlaces[key] = !compose.adPlaces[key];
-      render();
+      paintSwitch(row, compose.adPlaces[key]);
     });
   });
 
@@ -17035,7 +17065,7 @@ function bindCreatePost() {
   if (commentsAllowedRow) {
     commentsAllowedRow.addEventListener("click", function() {
       compose.commentsEnabled = compose.commentsEnabled === false ? true : false;
-      render();
+      paintSwitch(commentsAllowedRow, compose.commentsEnabled !== false);
     });
   }
 
