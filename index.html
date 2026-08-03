@@ -434,7 +434,7 @@
   .notif-badge { position:absolute; bottom:-2px; right:-2px; z-index:5; border-radius:50%; width:20px; height:20px; display:flex; align-items:center; justify-content:center; border:2px solid var(--bg); }
   .notif-dot { width:8px; height:8px; background:var(--accent); border-radius:50%; flex-shrink:0; }
 
-  .convo-row { display:flex; gap:12px; align-items:center; padding:13px 16px; border-bottom:1px solid var(--border); cursor:pointer; position:relative; transition:background 0.2s; user-select:none; }
+  .convo-row { display:flex; gap:12px; align-items:center; padding:13px 16px; border-bottom:none; cursor:pointer; position:relative; transition:background 0.2s; user-select:none; }
   .convo-row:hover { background:var(--surface); }
   .convo-row.deleting { opacity:0.5; }
   .convo-row.longpress-active { background:var(--surface); }
@@ -445,7 +445,7 @@
   .convo-section-label { display:flex; align-items:center; gap:6px; padding:16px 16px 8px; color:var(--accent); font-size:12px; font-weight:800; letter-spacing:.6px; text-transform:uppercase; cursor:default; }
   .convo-section-label[data-toggle-archived] { cursor:pointer; }
   .convo-pinned-wrap { margin:0 16px 6px; border:1px solid var(--border); border-radius:18px; overflow:hidden; background:var(--card); box-shadow:0 2px 10px rgba(0,0,0,0.06); }
-  .convo-pinned-wrap .convo-row { border-bottom:1px solid var(--border); }
+  .convo-pinned-wrap .convo-row { border-bottom:none; }
   .convo-pinned-wrap .convo-row:last-child { border-bottom:none; }
   .convo-pinned-wrap .convo-row:hover { background:transparent; }
 
