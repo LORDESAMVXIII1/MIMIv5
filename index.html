@@ -36,7 +36,7 @@
     -ms-user-select: text;
     user-select: text;
   }
-  html, body { margin:0; padding:0; background:var(--bg); overscroll-behavior-y: none; height:100%; }
+  html, body { margin:0; padding:0; background:var(--bg); overscroll-behavior-y: none; height:100%; touch-action:manipulation; }
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     color:var(--text);
@@ -100,7 +100,7 @@
     50% { opacity:1; transform:scale(1.15); }
   }
 
-  .input { background:var(--bg); border:1px solid var(--border); border-radius:14px; padding:12px 14px; color:var(--text); font-size:14px; outline:none; width:100%; }
+  .input { background:var(--bg); border:1px solid var(--border); border-radius:14px; padding:12px 14px; color:var(--text); font-size:16px; outline:none; width:100%; }
   .turnstile-frame { border-radius:16px; padding:3px; background:linear-gradient(135deg,var(--accent),var(--accentL)); box-shadow:0 4px 16px rgba(255,111,165,.25); transition:box-shadow .25s ease; width:100%; box-sizing:border-box; }
   .turnstile-frame-inner { background:var(--card); border-radius:13px; padding:6px; display:flex; justify-content:center; align-items:center; min-height:65px; width:100%; box-sizing:border-box; overflow:hidden; }
   .turnstile-frame-inner iframe { max-width:100% !important; width:100% !important; box-sizing:border-box !important; }
@@ -413,12 +413,12 @@
   .comment-time { font-size:12px; color:var(--muted); }
   .comment-text { margin:3px 0 0; font-size:13px; color:var(--sub); }
   .comment-input-row { display:flex; gap:8px; margin-top:6px; align-items:center; }
-  .comment-input { flex:1; background:var(--bg); border:none; border-radius:20px; padding:8px 14px; color:var(--text); font-size:13px; outline:none; }
+  .comment-input { flex:1; background:var(--bg); border:none; border-radius:20px; padding:8px 14px; color:var(--text); font-size:16px; outline:none; }
   .comment-send { background:var(--accent); border:none; border-radius:50%; width:36px; height:36px; cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
 
   .search-box { position:relative; }
   .search-icon { position:absolute; left:12px; top:50%; transform:translateY(-50%); }
-  .search-input { width:100%; background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:10px 14px 10px 38px; color:var(--text); font-size:14px; outline:none; }
+  .search-input { width:100%; background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:10px 14px 10px 38px; color:var(--text); font-size:16px; outline:none; }
   .chip-row { display:flex; gap:8px; padding:12px 16px; overflow-x:auto; scrollbar-width:none; }
   .chip { padding:7px 16px; border-radius:20px; border:1px solid var(--border); cursor:pointer; flex-shrink:0; background:var(--surface); color:var(--sub); font-size:13px; font-weight:600; }
   .chip.active { background:var(--accent); color:#fff; border:none; }
@@ -814,7 +814,7 @@
   /* 💌 COMPOR CARTA */
   .letter-compose-panel { position:relative; z-index:1; width:min(340px,90vw); background:var(--bg); border-radius:20px; padding:20px; box-shadow:0 20px 50px rgba(0,0,0,.35); }
   .letter-compose-title { display:flex; align-items:center; gap:8px; font-weight:700; font-size:15px; margin-bottom:12px; color:var(--text); }
-  .letter-compose-textarea { width:100%; min-height:120px; resize:vertical; border-radius:14px; border:1px solid var(--border); background:var(--surface); color:var(--text); padding:12px; font-size:14px; line-height:1.5; font-family:inherit; }
+  .letter-compose-textarea { width:100%; min-height:120px; resize:vertical; border-radius:14px; border:1px solid var(--border); background:var(--surface); color:var(--text); padding:12px; font-size:16px; line-height:1.5; font-family:inherit; }
   .letter-compose-textarea:focus { outline:none; border-color:var(--accent); }
   .letter-compose-count { text-align:right; font-size:11px; color:var(--muted); margin-top:4px; }
   .letter-compose-actions { display:flex; gap:10px; margin-top:14px; }
