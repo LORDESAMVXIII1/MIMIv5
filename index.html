@@ -441,13 +441,12 @@
   .convo-name-row { display:flex; justify-content:space-between; align-items:center; gap:8px; }
   .convo-last { margin:0; font-size:13px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .convo-last.unread { color:var(--sub); font-weight:600; }
-  .convo-turn-dot {
-    display:flex; align-items:center; justify-content:center; flex-shrink:0;
-    width:22px; height:22px; border-radius:50%;
-    background:linear-gradient(135deg,var(--accent),var(--accentL));
-    box-shadow:0 0 8px rgba(255,111,165,.55);
-    animation:convoTurnPulse 1.6s ease-in-out infinite;
+  .convo-time-col { display:flex; flex-direction:column; align-items:flex-end; gap:2px; margin-left:auto; flex-shrink:0; }
+  .convo-turn-chip {
+    font-size:9.5px; font-weight:800; color:var(--accent); background:rgba(255,111,165,.15);
+    padding:1px 6px; border-radius:8px; letter-spacing:.3px; text-transform:uppercase;
   }
+  .convo-time-sub { font-size:11px; color:var(--muted); }
   @keyframes convoTurnPulse {
     0%,100% { box-shadow:0 0 6px rgba(255,111,165,.45); transform:scale(1); }
     50% { box-shadow:0 0 12px rgba(255,111,165,.8); transform:scale(1.04); }
@@ -11764,19 +11763,20 @@ function renderConvoRow(c, insideCard) {
   return '<div class="convo-row" data-open-convo="'+c.id+'" data-convo-id="'+c.id+'" data-convo-longpress="'+c.id+'">' +
     '<div data-open-author="'+c.userId+'">'+avatarHtml(u.avatar, 50, c.online, false, false, null, null, getUserFrame(u))+'</div>' +
     '<div class="grow" style="overflow:hidden;">' +
-      '<div class="convo-name-row">' +
+      '<div class="convo-name-row"'+(isMyTurn ? ' style="align-items:flex-start;"' : '')+'>' +
         '<span style="font-weight:700;font-size:14px;">'+esc(u.name)+'</span>' +
         (c.pinned && !insideCard ? '<span style="font-size:11px;margin-left:6px;color:var(--accent);display:inline-flex;align-items:center;gap:3px;vertical-align:middle;">'+icoSvg("pinFill",11,C.accent,true)+'Fixada</span>' : '') +
         // 🟢 FIX: pontinho verde de "online" removido do avatar; agora é um
         // rótulo de texto "Online" na cor do antigo pontinho, ao lado do
         // nome — visível mas sem atrapalhar horário/fixada/preview.
         '<span data-convo-online-label="'+esc(c.userId)+'" style="display:'+(c.online?'inline':'none')+';font-size:11px;margin-left:6px;color:var(--green);font-weight:600;">Online</span>' +
-        '<span style="font-size:11px;color:var(--muted); margin-left:auto;">'+esc(c.time)+'</span>' +
+        (isMyTurn ?
+          '<div class="convo-time-col"><span class="convo-turn-chip">Responder</span><span class="convo-time-sub">'+esc(c.time)+'</span></div>' :
+          '<span style="font-size:11px;color:var(--muted); margin-left:auto;">'+esc(c.time)+'</span>') +
       '</div>' +
       '<p class="convo-last '+(c.unread?"unread":"")+'">'+renderConvoLastPreview(c.last)+'</p>' +
     '</div>' +
-    (c.unread > 0 ? '<div class="convo-unread-badge">'+c.unread+'</div>' :
-      (isMyTurn ? '<div class="convo-turn-dot" title="Sua vez de responder">'+icoSvg("arrowRight",12,"#fff")+'</div>' : "")) +
+    (c.unread > 0 ? '<div class="convo-unread-badge">'+c.unread+'</div>' : "") +
   '</div>';
 }
 
