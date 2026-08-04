@@ -5918,6 +5918,33 @@ var FB = {
   // ✅ FIX 3: Carrega mensagens. Se `since` for passado, busca só as novas (incremental)
   loadMessages: function(convoId, since) {
     var docsPromise = since ? fsListIncremental("convos/"+convoId+"/messages", since) : fsList("convos/"+convoId+"/messages");
+    // 🩹 FIX (mensagens que somem pro outro lado, mesmo já "lidas"): o
+    // Supabase é a fonte primária, mas fsSet() manda a escrita pro
+    // Supabase E pro Firebase em paralelo — se a réplica do Supabase
+    // falhar silenciosamente em segundo plano (ex.: instabilidade da
+    // Edge Function/fs-gateway), a mensagem fica só no Firebase e nunca
+    // aparece pro destinatário, porque fsList só cai pro Firebase quando
+    // a coleção INTEIRA vem vazia, não quando falta uma mensagem no meio
+    // de outras que carregaram normalmente. Isso também explica o ✔✔
+    // "lido" incoerente: markConvoRead() grava a hora em que a conversa
+    // foi aberta, não a hora da última mensagem realmente carregada — se
+    // a mensagem estava "presa" só no Firebase nesse momento, ela conta
+    // como lida sem nunca ter sido exibida.
+    // Corrige na carga INICIAL (sem "since", ou seja, ao abrir a
+    // conversa): confere o Firebase também e mescla pelo _id qualquer
+    // mensagem que só exista lá. Fica de fora do poll incremental de 8s
+    // de propósito, pra não recriar o excesso de leitura que motivou a
+    // migração pro Supabase.
+    if (!since && typeof SupabaseDB !== "undefined") {
+      docsPromise = docsPromise.then(function(supaMsgs) {
+        return _fsListFirebase("convos/"+convoId+"/messages").then(function(fbMsgs){
+          var byId = {};
+          (supaMsgs || []).forEach(function(m){ byId[m._id] = m; });
+          (fbMsgs || []).forEach(function(m){ if (!byId[m._id]) byId[m._id] = m; });
+          return Object.keys(byId).map(function(k){ return byId[k]; });
+        }).catch(function(){ return supaMsgs; });
+      });
+    }
     return docsPromise.then(function(msgs) {
       var full = msgs.map(function(m){
         if (!m.chunked) return Promise.resolve(m);
