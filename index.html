@@ -441,6 +441,17 @@
   .convo-name-row { display:flex; justify-content:space-between; align-items:center; gap:8px; }
   .convo-last { margin:0; font-size:13px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .convo-last.unread { color:var(--sub); font-weight:600; }
+  .convo-turn-badge {
+    display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:800;
+    color:#fff; background:linear-gradient(135deg,var(--accent),var(--accentL));
+    padding:2px 8px; border-radius:20px; margin-top:3px;
+    box-shadow:0 0 8px rgba(255,111,165,.55);
+    animation:convoTurnPulse 1.6s ease-in-out infinite;
+  }
+  @keyframes convoTurnPulse {
+    0%,100% { box-shadow:0 0 6px rgba(255,111,165,.45); transform:scale(1); }
+    50% { box-shadow:0 0 12px rgba(255,111,165,.8); transform:scale(1.04); }
+  }
   .convo-unread-badge { background:var(--accent); color:#fff; font-size:11px; font-weight:700; border-radius:20px; padding:2px 7px; min-width:20px; text-align:center; flex-shrink:0; }
   .convo-section-label { display:flex; align-items:center; gap:6px; padding:16px 16px 8px; color:var(--accent); font-size:12px; font-weight:800; letter-spacing:.6px; text-transform:uppercase; cursor:default; }
   .convo-section-label[data-toggle-archived] { cursor:pointer; }
@@ -5854,6 +5865,7 @@ var FB = {
           activeMazeRoomId: doc.activeMazeRoomId || null,
           activeTicTacRoomId: doc.activeTicTacRoomId || null,
           _lastTimeRaw: doc.lastTime || null,
+          lastSenderId: doc.lastSenderId || null,
         });
         if (!USERS[otherId]) {
           fsGet("users/"+otherId).then(function(u) {
@@ -6578,6 +6590,7 @@ function _applyConvoDoc(doc, myId) {
       activeMazeRoomId: doc.activeMazeRoomId || null,
       activeTicTacRoomId: doc.activeTicTacRoomId || null,
       _lastTimeRaw: doc.lastTime || null,
+      lastSenderId: doc.lastSenderId || null,
     };
     CONVOS.unshift(conv);
     changed = true;
@@ -6595,6 +6608,7 @@ function _applyConvoDoc(doc, myId) {
     conv._lastTimeRaw = doc.lastTime;
     conv.last = doc.lastMsg || conv.last;
     conv.time = _relTime(doc.lastTime);
+    conv.lastSenderId = doc.lastSenderId || null;
     changed = true;
     var isFromOther = doc.lastSenderId && doc.lastSenderId !== myId && doc.lastSenderId !== _fbUid;
     var myLastRead = doc["lastRead_" + myId] || null;
@@ -7536,6 +7550,7 @@ function _mergeIncomingMessages(convoId, msgs) {
       }
       var lastCreatedAt = lastMsg.createdAt || new Date().toISOString();
       conv.time = _relTime(lastCreatedAt);
+      conv.lastSenderId = lastMsg.senderId || null;
     }
     // FIX: não forçar scrollChatToBottom() aqui. O backgroundRender() já
     // chama render(), que tem sua própria lógica de restaurar a posição
@@ -11729,7 +11744,8 @@ function renderConvoLastPreview(text) {
 
 function renderConvoRow(c, insideCard) {
   var u = USERS[c.userId] || { name: c.userId, username: "", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed="+c.userId };
-  
+  var isMyTurn = !!(c.lastSenderId && c.lastSenderId !== ME_ID);
+
   return '<div class="convo-row" data-open-convo="'+c.id+'" data-convo-id="'+c.id+'" data-convo-longpress="'+c.id+'">' +
     '<div data-open-author="'+c.userId+'">'+avatarHtml(u.avatar, 50, c.online, false, false, null, null, getUserFrame(u))+'</div>' +
     '<div class="grow" style="overflow:hidden;">' +
@@ -11739,6 +11755,7 @@ function renderConvoRow(c, insideCard) {
         '<span style="font-size:11px;color:var(--muted); margin-left:auto;">'+esc(c.time)+'</span>' +
       '</div>' +
       '<p class="convo-last '+(c.unread?"unread":"")+'">'+renderConvoLastPreview(c.last)+'</p>' +
+      (isMyTurn ? '<div class="convo-turn-badge">'+icoSvg("arrowRight",11,"#fff")+' Sua vez de responder</div>' : '') +
     '</div>' +
     (c.unread > 0 ? '<div class="convo-unread-badge">'+c.unread+'</div>' : "") +
   '</div>';
@@ -12231,7 +12248,7 @@ function bindMsgsPage() {
     chat.push(msgObj);
     
     var conv = CONVOS.find(function(c){ return c.id === state.activeConvoId; });
-    if (conv) { conv.last = mediaType === "video" ? "🎥 Vídeo" : "📷 Foto"; conv.time = _relTime(createdAt); }
+    if (conv) { conv.last = mediaType === "video" ? "🎥 Vídeo" : "📷 Foto"; conv.time = _relTime(createdAt); conv.lastSenderId = ME_ID; }
     
     // Renderizar card de mensagem
     var chatBox = appEl.querySelector("[data-chat-msgs]");
@@ -12303,7 +12320,7 @@ function bindMsgsPage() {
     chat.push(msgObj);
 
     var conv = CONVOS.find(function(c){ return c.id === state.activeConvoId; });
-    if (conv) { conv.last = "🧩 Figurinha"; conv.time = _relTime(createdAt); }
+    if (conv) { conv.last = "🧩 Figurinha"; conv.time = _relTime(createdAt); conv.lastSenderId = ME_ID; }
 
     var chatBox = appEl.querySelector("[data-chat-msgs]");
     if (chatBox) {
@@ -12498,7 +12515,7 @@ function bindMsgsPage() {
     chat.push(msgObj);
     
     var conv = CONVOS.find(function(c){ return c.id === state.activeConvoId; });
-    if (conv) { conv.last = kind === "video" ? "🎥 Vídeo" : "📷 Foto"; conv.time = "agora"; }
+    if (conv) { conv.last = kind === "video" ? "🎥 Vídeo" : "📷 Foto"; conv.time = "agora"; conv.lastSenderId = ME_ID; }
     
     var chatBox = appEl.querySelector("[data-chat-msgs]");
     if (chatBox) {
@@ -12855,7 +12872,7 @@ function sendChatMessage() {
   chat.push(msgObj);
   
   var conv = CONVOS.find(function(c){ return c.id === state.activeConvoId; });
-  if (conv) { conv.last = text; conv.time = "agora"; }
+  if (conv) { conv.last = text; conv.time = "agora"; conv.lastSenderId = ME_ID; }
   
   // FIX: Atualizar apenas o novo card de mensagem, SEM fazer render() completo
   var chatBox = appEl.querySelector("[data-chat-msgs]");
@@ -12974,7 +12991,7 @@ function sendLoveLetter(text) {
   chat.push(msgObj);
 
   var conv = CONVOS.find(function(c){ return c.id === state.activeConvoId; });
-  if (conv) { conv.last = "Carta de amor"; conv.time = "agora"; }
+  if (conv) { conv.last = "Carta de amor"; conv.time = "agora"; conv.lastSenderId = ME_ID; }
 
   var chatBox = appEl.querySelector("[data-chat-msgs]");
   if (chatBox) {
@@ -13193,7 +13210,7 @@ function sendMazeInvite() {
   // (ver openMazeGameFromMsg) — sem isso, dois convites diferentes no
   // histórico do chat podiam ser abertos por cada lado, cada um caindo numa
   // sala/labirinto diferente (seeds diferentes) sem nunca se verem.
-  if (conv) { conv.last = "Labirinto"; conv.time = "agora"; conv.activeMazeRoomId = roomId; }
+  if (conv) { conv.last = "Labirinto"; conv.time = "agora"; conv.activeMazeRoomId = roomId; conv.lastSenderId = ME_ID; }
 
   var chatBox = appEl.querySelector("[data-chat-msgs]");
   if (chatBox) {
@@ -13729,7 +13746,7 @@ function sendTicTacInvite() {
   chat.push(msgObj);
   // Mesma proteção já aplicada no labirinto: só o convite mais recente da
   // conversa é válido (ver openTicTacGameFromMsg / mazeLatestRoomId).
-  if (conv) { conv.last = "Jogo da velha"; conv.time = "agora"; conv.activeTicTacRoomId = roomId; }
+  if (conv) { conv.last = "Jogo da velha"; conv.time = "agora"; conv.activeTicTacRoomId = roomId; conv.lastSenderId = ME_ID; }
 
   var chatBox = appEl.querySelector("[data-chat-msgs]");
   if (chatBox) {
@@ -14362,7 +14379,7 @@ function beginAudioRecording(stream) {
       var msgObj = { id:uid(), _firestoreId:null, me:true, type:"audio", src:cloudinaryUrl, duration:duration, time:nowTime(), createdAt:_audioCreatedAt };
       chat.push(msgObj);
       var conv = CONVOS.find(function(c){ return c.id === _targetConvoId; });
-      if (conv) { conv.last = "🎤 Áudio"; conv.time = "agora"; }
+      if (conv) { conv.last = "🎤 Áudio"; conv.time = "agora"; conv.lastSenderId = ME_ID; }
       render();
       scrollChatToBottom();
       
