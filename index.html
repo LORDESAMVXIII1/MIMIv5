@@ -441,10 +441,10 @@
   .convo-name-row { display:flex; justify-content:space-between; align-items:center; gap:8px; }
   .convo-last { margin:0; font-size:13px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .convo-last.unread { color:var(--sub); font-weight:600; }
-  .convo-turn-badge {
-    display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:800;
-    color:#fff; background:linear-gradient(135deg,var(--accent),var(--accentL));
-    padding:2px 8px; border-radius:20px; margin-top:3px;
+  .convo-turn-dot {
+    display:flex; align-items:center; justify-content:center; flex-shrink:0;
+    width:22px; height:22px; border-radius:50%;
+    background:linear-gradient(135deg,var(--accent),var(--accentL));
     box-shadow:0 0 8px rgba(255,111,165,.55);
     animation:convoTurnPulse 1.6s ease-in-out infinite;
   }
@@ -11774,9 +11774,9 @@ function renderConvoRow(c, insideCard) {
         '<span style="font-size:11px;color:var(--muted); margin-left:auto;">'+esc(c.time)+'</span>' +
       '</div>' +
       '<p class="convo-last '+(c.unread?"unread":"")+'">'+renderConvoLastPreview(c.last)+'</p>' +
-      (isMyTurn ? '<div class="convo-turn-badge">'+icoSvg("arrowRight",11,"#fff")+' Sua vez de responder</div>' : '') +
     '</div>' +
-    (c.unread > 0 ? '<div class="convo-unread-badge">'+c.unread+'</div>' : "") +
+    (c.unread > 0 ? '<div class="convo-unread-badge">'+c.unread+'</div>' :
+      (isMyTurn ? '<div class="convo-turn-dot" title="Sua vez de responder">'+icoSvg("arrowRight",12,"#fff")+'</div>' : "")) +
   '</div>';
 }
 
