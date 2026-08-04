@@ -5901,14 +5901,16 @@ var FB = {
             if (u) { delete u._id; u.uid = otherId; USERS[otherId] = u; backgroundRender(); }
           }).catch(function(){});
         }
-        // 🩹 FIX (preview/aviso "Responder" sumidos juntos): ambos vêm dos
-        // campos lastMsg/lastSenderId do PRÓPRIO doc da conversa. Se esse
-        // doc chegou do Supabase sem esses campos (mensagem espelhada com
-        // falha, ou doc antigo nunca atualizado), os dois somem ao mesmo
-        // tempo — mesmo com mensagens reais existindo na subcoleção. Aqui
-        // detecta a ausência e busca a última mensagem de verdade para
-        // reconstruir o preview e quem enviou por último.
-        if (!doc.lastMsg) {
+        // 🩹 FIX (preview/aviso "Responder" sumidos juntos OU só o aviso
+        // sozinho): antes só reparava quando lastMsg vinha ausente do doc,
+        // assumindo que lastMsg e lastSenderId sempre se perdem juntos. Mas
+        // dá pra lastMsg ter mirrado certinho (prévia aparece normal) e
+        // lastSenderId sozinho ter ficado ausente/desatualizado — nesse
+        // caso a badge "Responder" some no boot, sem nada de errado visível
+        // na lista, e só reaparece depois de abrir a conversa (que recalcula
+        // o remetente da última mensagem direto da subcoleção). Aqui cobre
+        // os dois casos.
+        if (!doc.lastMsg || !doc.lastSenderId) {
           FB._repairConvoPreview(doc._id, otherId, myId);
         }
       });
