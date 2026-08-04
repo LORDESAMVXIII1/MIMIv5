@@ -1554,6 +1554,31 @@
 <script>
 "use strict";
 
+// ─── BLOQUEIO DE ZOOM (reforço via JS) ─────────────────────
+// A meta viewport (user-scalable=no) já bloqueia zoom no navegador padrão,
+// mas o Chrome tem uma opção de acessibilidade "Forçar zoom" que ignora
+// essa meta tag de propósito (é pensada pra vencer sites que bloqueiam
+// zoom). Esse bloco reforça o bloqueio no nível de toque, que é mais
+// difícil dessa opção contornar: impede o gesto de pinça (2+ dedos) e o
+// zoom por duplo toque rápido.
+(function blockZoom(){
+  document.addEventListener('touchmove', function(e){
+    if (e.touches && e.touches.length > 1) e.preventDefault();
+  }, { passive:false });
+
+  var lastTouchEnd = 0;
+  document.addEventListener('touchend', function(e){
+    var now = Date.now();
+    if (now - lastTouchEnd <= 300) e.preventDefault();
+    lastTouchEnd = now;
+  }, { passive:false });
+
+  // Safari/iOS dispara gestos de pinça via gesture events
+  document.addEventListener('gesturestart', function(e){ e.preventDefault(); });
+  document.addEventListener('gesturechange', function(e){ e.preventDefault(); });
+  document.addEventListener('gestureend', function(e){ e.preventDefault(); });
+})();
+
 // ─── DIAGNÓSTICO VISÍVEL DE ERROS ──────────────────────────
 // Mostra qualquer erro não tratado (ou promise rejeitada) direto na tela,
 // numa faixa vermelha no rodapé — assim dá pra saber o que quebrou sem
@@ -15318,8 +15343,8 @@ function renderProfilePage(userId) {
   if (!u) return '<div class="search-empty">Perfil não encontrado.</div>';
   var isMe = userId === ME_ID;
   var tabs = FEED_MUSIC_POSTS_ENABLED
-    ? (isMe ? ["posts","músicas","mídia","curtidas","salvos"] : ["posts","músicas","mídia","curtidas"])
-    : (isMe ? ["posts","mídia","curtidas","salvos"] : ["posts","mídia","curtidas"]);
+    ? (isMe ? ["posts","músicas","mídia","curtidas","salvos"] : ["posts","músicas","mídia"].concat(u.hideLikesTab ? [] : ["curtidas"]))
+    : (isMe ? ["posts","mídia","curtidas","salvos"] : ["posts","mídia"].concat(u.hideLikesTab ? [] : ["curtidas"]));
   if (!tabs.indexOf || tabs.indexOf(profileTab) === -1) profileTab = "posts";
 
   var isCoverVideo = !!(u.cover && u.coverType === "video");
@@ -17324,6 +17349,18 @@ function renderSettingsPage() {
     '</div>' +
   '</div>' +
 
+  '<div class="cfg-item" data-toggle-hide-likes style="cursor:pointer;">' +
+    '<div class="cfg-item-icon" style="background:#fff0f6;">'+icoSvg("user",20,C.accent)+'</div>' +
+    '<div class="grow">' +
+      '<div class="cfg-item-label">Ocultar minhas curtidas no perfil</div>' +
+      '<div class="cfg-item-sub">A aba "curtidas" do seu perfil fica visível só pra você; outras pessoas não veem o que você curtiu</div>' +
+    '</div>' +
+    '<div class="cfg-switch'+(me.hideLikesTab?" active":"")+'" style="width:42px;height:24px;border-radius:12px;background:'+(me.hideLikesTab?C.accent:"var(--border)")+';position:relative;flex-shrink:0;transition:background .2s;">' +
+      '<div style="width:18px;height:18px;border-radius:50%;background:#fff;position:absolute;top:3px;left:'+(me.hideLikesTab?"21px":"3px")+';transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,.2);"></div>' +
+    '</div>' +
+  '</div>' +
+
+
   '<div class="cfg-item" style="cursor:default;align-items:flex-start;">' +
     '<div class="cfg-item-icon" style="background:#fff0f6;">'+icoSvg("user",20,C.accent)+'</div>' +
     '<div class="grow">' +
@@ -17489,6 +17526,17 @@ function bindSettingsPage() {
     me.hideFollowerCount = !me.hideFollowerCount;
     render();
     fsSet("users/"+ME_ID, { hideFollowerCount: me.hideFollowerCount }).catch(function(err) {
+      console.error("Erro ao salvar preferência de privacidade:", err);
+    });
+  });
+
+  // Ocultar aba de curtidas do perfil (só o dono continua vendo a própria)
+  var hideLikesBtn = appEl.querySelector("[data-toggle-hide-likes]");
+  if (hideLikesBtn) hideLikesBtn.addEventListener("click", function() {
+    var me = ME_obj();
+    me.hideLikesTab = !me.hideLikesTab;
+    render();
+    fsSet("users/"+ME_ID, { hideLikesTab: me.hideLikesTab }).catch(function(err) {
       console.error("Erro ao salvar preferência de privacidade:", err);
     });
   });
