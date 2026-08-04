@@ -5837,6 +5837,37 @@ var FB = {
     return fsSet("convos/" + convoId, field, true).catch(function(){});
   },
 
+  // 🩹 Reparo: quando o doc da conversa não tem lastMsg/lastSenderId (ver
+  // FIX acima em loadConvos), busca a última mensagem real da subcoleção
+  // e usa ela pra preencher preview + remetente na lista de conversas.
+  _repairConvoPreview: function(convoId, otherId, myId) {
+    fsList("convos/"+convoId+"/messages").then(function(msgs) {
+      if (!msgs || !msgs.length) return;
+      msgs.sort(function(a,b){ return (a.createdAt||"").localeCompare(b.createdAt||""); });
+      var lastMsg = null;
+      for (var i = msgs.length - 1; i >= 0; i--) {
+        if (!msgs[i].deleted) { lastMsg = msgs[i]; break; }
+      }
+      if (!lastMsg) return;
+      var conv = CONVOS.find(function(c){ return c.id === convoId; });
+      if (!conv) return;
+      var msgType = lastMsg.type || "text";
+      var preview = "Mensagem";
+      if (msgType === "text" || msgType === "letter") preview = lastMsg.content || lastMsg.text || "Mensagem";
+      else if (msgType === "image") preview = "📷 Foto";
+      else if (msgType === "video") preview = "🎥 Vídeo";
+      else if (msgType === "audio") preview = "🎤 Áudio";
+      else if (msgType === "sticker") preview = "🧩 Figurinha";
+      else if (msgType === "maze") preview = "Labirinto";
+      else if (msgType === "tictac") preview = "Jogo da velha";
+      conv.last = preview;
+      conv.time = _relTime(lastMsg.createdAt || new Date().toISOString());
+      conv._lastTimeRaw = lastMsg.createdAt || conv._lastTimeRaw;
+      conv.lastSenderId = (lastMsg.senderId === myId || lastMsg.senderId === _fbUid) ? myId : otherId;
+      backgroundRender();
+    }).catch(function(){});
+  },
+
   // Carrega conversas reais do utilizador do Firestore
   loadConvos: function() {
     if (!_idToken || !_fbUid) return Promise.resolve();
@@ -5869,6 +5900,16 @@ var FB = {
           fsGet("users/"+otherId).then(function(u) {
             if (u) { delete u._id; u.uid = otherId; USERS[otherId] = u; backgroundRender(); }
           }).catch(function(){});
+        }
+        // 🩹 FIX (preview/aviso "Responder" sumidos juntos): ambos vêm dos
+        // campos lastMsg/lastSenderId do PRÓPRIO doc da conversa. Se esse
+        // doc chegou do Supabase sem esses campos (mensagem espelhada com
+        // falha, ou doc antigo nunca atualizado), os dois somem ao mesmo
+        // tempo — mesmo com mensagens reais existindo na subcoleção. Aqui
+        // detecta a ausência e busca a última mensagem de verdade para
+        // reconstruir o preview e quem enviou por último.
+        if (!doc.lastMsg) {
+          FB._repairConvoPreview(doc._id, otherId, myId);
         }
       });
     });
