@@ -2197,12 +2197,11 @@ function avatarHtml(src, size, online, ring, plusRing, ringColors, themeKey, fra
   var themeVar = plusRing && ringColors ? "--ring-colors:"+ringColors+";" : "";
   var html = '<div class="'+wrapClass+'" style="'+themeVar+'position:relative;width:'+size+'px;height:'+size+'px;flex-shrink:0;overflow:visible;">'+
     '<img src="'+src+'" alt="" class="avatar '+ringClass+'" style="width:'+size+'px;height:'+size+'px;">';
-  var s = Math.round(size*.26);
-  // 🟢 FIX: antes esse <div> só existia no HTML quando "online" era true —
-  // pra atualizar o pontinho verde sem reconstruir a tela inteira (ver
-  // patchOnlineStatusDom), ele agora está sempre no DOM e só alterna
-  // "display", dando um elemento estável pra localizar depois.
-  html += '<div data-online-dot style="display:'+(online?'block':'none')+';position:absolute;bottom:1px;right:1px;width:'+s+'px;height:'+s+'px;border-radius:50%;background:var(--green);border:2px solid var(--bg);z-index:5;"></div>';
+  // 🟢 REMOVIDO: pontinho verde de "online" sobre o avatar. A pedido do
+  // Igor, o status online agora aparece como texto "Online" (na cor do
+  // antigo pontinho) perto das outras infos do contato, em vez de um
+  // indicador visual sobre a foto — ver renderConvoRow() e o cabeçalho
+  // do chat, que já usa [data-online-indicator] em texto.
   var frame = frameKey && PROFILE_FRAMES[frameKey];
   if (frame) {
     var fsize = Math.round(size * frame.scale);
@@ -6701,8 +6700,10 @@ var _onlineCheckInterval = 30000;  // Checar a cada 30s (não a cada 8s)
 // (appEl ausente); "nada pra atualizar aqui" conta como sucesso.
 function patchOnlineStatusDom(otherId, online) {
   if (!appEl) return false;
-  appEl.querySelectorAll('[data-open-author="'+otherId+'"] [data-online-dot]').forEach(function(dot) {
-    dot.style.display = online ? "block" : "none";
+  // 🟢 FIX: pontinho verde removido do avatar; agora atualiza o rótulo de
+  // texto "Online" (ver renderConvoRow) na lista de conversas.
+  appEl.querySelectorAll('[data-convo-online-label="'+otherId+'"]').forEach(function(label) {
+    label.style.display = online ? "inline" : "none";
   });
   if (state.page === "msgs" && state.activeConvoId) {
     var conv = CONVOS.find(function(c){ return c.id === state.activeConvoId; });
@@ -7534,11 +7535,25 @@ function _mergeIncomingMessages(convoId, msgs) {
     }
   });
   if (changed) {
-    var lastMsg = msgs[msgs.length-1];
+    // 🩹 FIX (badge "Sua vez de responder" errado): antes pegava
+    // msgs[msgs.length-1], ou seja, o ÚLTIMO item do lote bruto que
+    // acabou de chegar do servidor — não necessariamente a mensagem
+    // mais recente da conversa! Uma reação a uma mensagem ANTIGA
+    // (ex.: a outra pessoa reage a algo de dias atrás) também entra
+    // nesse lote como "mudança", e se ela vier por último no array,
+    // isso sobrescrevia o preview e o lastSenderId da conversa com os
+    // dados dessa mensagem antiga — fazendo o badge de "sua vez"
+    // aparecer/sumir errado, mesmo com a mensagem mais nova já sendo
+    // sua. Agora usa a mensagem realmente mais recente do histórico
+    // local (`chat`), que fica sempre ordenado por createdAt.
+    var lastMsg = null;
+    for (var _li = chat.length - 1; _li >= 0; _li--) {
+      if (!chat[_li].deleted) { lastMsg = chat[_li]; break; }
+    }
     var conv = CONVOS.find(function(c){ return c.id === convoId; });
     if (conv && lastMsg) {
       if (lastMsg.type === "text") {
-        conv.last = lastMsg.content || lastMsg.text || "Mensagem";
+        conv.last = lastMsg.text || "Mensagem";
       } else if (lastMsg.type === "image") {
         conv.last = "📷 Foto";
       } else if (lastMsg.type === "video") {
@@ -7550,7 +7565,7 @@ function _mergeIncomingMessages(convoId, msgs) {
       }
       var lastCreatedAt = lastMsg.createdAt || new Date().toISOString();
       conv.time = _relTime(lastCreatedAt);
-      conv.lastSenderId = lastMsg.senderId || null;
+      conv.lastSenderId = lastMsg.me ? ME_ID : conv.userId;
     }
     // FIX: não forçar scrollChatToBottom() aqui. O backgroundRender() já
     // chama render(), que tem sua própria lógica de restaurar a posição
@@ -11752,6 +11767,10 @@ function renderConvoRow(c, insideCard) {
       '<div class="convo-name-row">' +
         '<span style="font-weight:700;font-size:14px;">'+esc(u.name)+'</span>' +
         (c.pinned && !insideCard ? '<span style="font-size:11px;margin-left:6px;color:var(--accent);display:inline-flex;align-items:center;gap:3px;vertical-align:middle;">'+icoSvg("pinFill",11,C.accent,true)+'Fixada</span>' : '') +
+        // 🟢 FIX: pontinho verde de "online" removido do avatar; agora é um
+        // rótulo de texto "Online" na cor do antigo pontinho, ao lado do
+        // nome — visível mas sem atrapalhar horário/fixada/preview.
+        '<span data-convo-online-label="'+esc(c.userId)+'" style="display:'+(c.online?'inline':'none')+';font-size:11px;margin-left:6px;color:var(--green);font-weight:600;">Online</span>' +
         '<span style="font-size:11px;color:var(--muted); margin-left:auto;">'+esc(c.time)+'</span>' +
       '</div>' +
       '<p class="convo-last '+(c.unread?"unread":"")+'">'+renderConvoLastPreview(c.last)+'</p>' +
