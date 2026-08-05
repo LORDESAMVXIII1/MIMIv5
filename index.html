@@ -5036,6 +5036,31 @@ function translateAuthError(errObj) {
   return AUTH_ERROR_MESSAGES[code] || AUTH_ERROR_MESSAGES[baseCode] || ("Não foi possível autenticar (" + code + "). Tente novamente.");
 }
 
+// 2.1/2.2 (ranking real das Vibes) — agrega, direto no documento da
+// vibe, os sinais implícitos que FB.logEvent já registra bruto em
+// "interaction_events". Só cobre a coleção "vibes" por enquanto (é o
+// único lugar de onde logEvent é chamado hoje); se um dia posts também
+// logarem view/watch_time, isso precisa saber diferenciar a coleção.
+// Fire-and-forget, com leitura+escrita (não é atômico — em escala baixa
+// a chance de duas visualizações simultâneas colidirem e uma delas
+// "perder" o incremento é aceitável; se o volume crescer, isso deveria
+// virar uma função no fs-gateway com incremento atômico no Postgres).
+function _bumpVibeEngagementAggregate(vibeId, eventType, value) {
+  if (eventType !== "view" && eventType !== "watch_time") return;
+  fsGet("vibes/" + vibeId).then(function(v) {
+    if (!v) return;
+    var patch = {};
+    if (eventType === "view") {
+      patch.viewCount = (v.viewCount || 0) + 1;
+    } else {
+      if (typeof value !== "number" || value < 0) return;
+      patch.totalWatchSeconds = (v.totalWatchSeconds || 0) + value;
+      patch.watchSamples = (v.watchSamples || 0) + 1;
+    }
+    fsSet("vibes/" + vibeId, patch, true).catch(function() {});
+  }).catch(function() {});
+}
+
 // ── FIREBASE SERVICE (REST, sem SDK, funciona em WebView) ─────
 var FB = {
 
@@ -5765,7 +5790,15 @@ var FB = {
           likes: likedBy.length,
           liked: likedBy.indexOf(ME_ID) !== -1,
           fireTotal: d.fireTotal || 0,
-          createdAt: d.createdAt ? new Date(d.createdAt).getTime() : Date.now()
+          createdAt: d.createdAt ? new Date(d.createdAt).getTime() : Date.now(),
+          // 2.1 (ranking real): agregados escritos por
+          // _bumpVibeEngagementAggregate a partir dos eventos de
+          // view/watch_time do Vibes — usados pelo score em
+          // VibesModule.loadUserVibes, não só curtida.
+          viewCount: d.viewCount || 0,
+          totalWatchSeconds: d.totalWatchSeconds || 0,
+          watchSamples: d.watchSamples || 0,
+          avgWatchSeconds: d.watchSamples ? (d.totalWatchSeconds || 0) / d.watchSamples : 0
         };
       });
     }).catch(function(err){
@@ -6243,6 +6276,13 @@ var FB = {
     }).catch(function(err) {
       console.warn("⚠️ logEvent('" + eventType + "') falhou:", err && err.message || err);
     });
+    // 2.1/2.2 (ranking real): além do evento bruto (pra auditoria/futuras
+    // análises mais finas), atualiza um contador AGREGADO direto no
+    // documento da vibe — viewCount e o tempo médio de visualização. É
+    // esse agregado que o ranking em VibesModule.loadUserVibes lê; assim
+    // o feed não precisa escanear "interaction_events" inteiro (que só
+    // cresce) toda vez que alguém abre a aba Vibes.
+    _bumpVibeEngagementAggregate(contentId, eventType, value);
   },
 
   // Registrar denúncia de comentário. Guarda um "retrato" do conteúdo (texto,
@@ -19640,11 +19680,42 @@ console.log("🔧 Cloud Name:", window.CLOUDINARY_CLOUD_NAME || "mimi-app");
 // fosse um número mais baixo. Total errado, sem erro nenhum no console.
 var _vibeFireWriteChain = {};
 
+// 2.1/2.2 (ranking real): substitui o "só curtida" por um score híbrido —
+// engajamento ponderado (sinal implícito pesando mais que o explícito) ×
+// decaimento por idade, mais um empurrão temporário pra conteúdo novo.
+// É essa última parte que resolve o problema original (vídeo recém-
+// postado, sem tempo de acumular curtida/view, sumindo no final do feed).
+function _vibeEngagementScore(v) {
+  var ageHours = Math.max(0, (Date.now() - (v.createdAt || Date.now())) / 3600000);
+  // Decaimento "hot" (mesma ideia do Reddit): quanto mais velha a vibe,
+  // menos peso o engajamento acumulado carrega — sem isso, uma vibe de
+  // meses com muita curtida nunca sairia do topo mesmo parada.
+  var decay = 1 / Math.pow(1 + ageHours / 12, 1.2);
+  // avgWatchSeconds é o sinal implícito (ninguém finge que assistiu) —
+  // pesa mais que curtida/fogo (explícitos, mas mais fáceis de inflar).
+  // viewCount sozinho pesa pouco: um view de 1s não deveria valer quase
+  // nada perto de alguém que ficou assistindo de verdade.
+  var engagement = (v.likes || 0) * 1 +
+                    (v.fireTotal || 0) * 1.5 +
+                    (v.viewCount || 0) * 0.2 +
+                    (v.avgWatchSeconds || 0) * 3;
+  // Boost de conteúdo novo: nas primeiras horas, a vibe ainda não teve
+  // tempo de provar se engaja — sem isso ela fica presa no final até
+  // acumular curtida, que é exatamente o bug que o Igor reportou.
+  var newBoost = ageHours < 2 ? 50 : (ageHours < 6 ? 20 : 0);
+  return engagement * decay + newBoost;
+}
+
 var VibesModule = {
   vibes: [],
   vibesByUser: {}, // { userId: [vibe1, vibe2, ...] }
   currentSlide: 0,
   commentsFor: null, // id da vibe com o painel de comentários aberto (ou null)
+  // Debug TEMPORÁRIO do ranking (2.1) — mostra score/views/tempo médio em
+  // cada vibe pra conferir se o novo ranking está funcionando de verdade,
+  // sem precisar de devtools (você só tem acesso pelo celular). Toggle
+  // manual pelo botão 🔧 no canto da tela — tirar depois que confirmar.
+  _debugRanking: false,
   
   init: function() {
     // Sem vibes de demonstração — a lista começa vazia e é preenchida a
@@ -19669,9 +19740,11 @@ var VibesModule = {
     self._loading = true;
     if (state.page === "vibes") render();
     FB.loadVibes().then(function(vibes) {
-      // Ordena por engajamento (curtidas), do mais curtido pro menos curtido —
-      // antes era por data de publicação (mais recente primeiro).
-      vibes.sort(function(a, b) { return (b.likes||0) - (a.likes||0); });
+      // Ranking real (2.1/2.2): score híbrido de engajamento × decaimento
+      // por idade + boost de conteúdo novo — não só curtida (ver
+      // _vibeEngagementScore). Antes era por curtida crua, e antes disso
+      // por data de publicação.
+      vibes.sort(function(a, b) { return _vibeEngagementScore(b) - _vibeEngagementScore(a); });
       self.vibes = vibes;
       self._loading = false;
       render(); // perfil e outras telas também dependem de VibesModule.vibes (ver userVibes)
@@ -19737,7 +19810,14 @@ var VibesModule = {
     var self = this;
     var adSlides = adsForPlace("vibes");
     var html = '<div class="vibes-page" style="position:relative;width:100%;height:100vh;height:100dvh;background:#000;overflow:hidden;">';
-    
+
+    // Botão TEMPORÁRIO pra ligar/desligar o selo de debug do ranking (2.1).
+    // Fica sempre visível de propósito enquanto estamos testando — depois
+    // que confirmar os números, eu tiro esse botão e o selo junto.
+    html += '<button data-vibe-debug-toggle style="position:absolute;top:calc(env(safe-area-inset-top,0px) + 14px);left:14px;z-index:50;width:34px;height:34px;border-radius:50%;border:none;background:'+(this._debugRanking?"#ff4d6d":"rgba(0,0,0,.45)")+';display:flex;align-items:center;justify-content:center;">' +
+      icoSvg("settings",18,"#fff") +
+    '</button>';
+
     if (this.vibes.length === 0 && this._loading) {
       html += '<div style="display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;color:#fff;padding:20px;">' +
         '<div style="margin-bottom:20px;">'+icoSvg("sparkle",44,"var(--accentL,#ffb3d1)",true)+'</div>' +
@@ -19762,9 +19842,20 @@ var VibesModule = {
         if (!vUser && vibe.userId) self.fetchMissingUser(vibe.userId);
         var vAvatar = (vUser && vUser.avatar) || vibe.avatar || ("https://api.dicebear.com/7.x/avataaars/svg?seed=" + (vibe.userId || vibe.username));
         var vFrame = vUser ? getUserFrame(vUser) : null;
+        var debugBadge = "";
+        if (self._debugRanking) {
+          var _dbgAgeH = ((Date.now() - (vibe.createdAt||Date.now())) / 3600000).toFixed(1);
+          var _dbgScore = _vibeEngagementScore(vibe).toFixed(1);
+          debugBadge = '<div style="position:absolute;top:calc(env(safe-area-inset-top,0px) + 54px);left:14px;z-index:50;background:rgba(0,0,0,.65);color:#fff;font-size:11px;line-height:1.5;padding:8px 10px;border-radius:10px;font-family:monospace;">' +
+            'score '+_dbgScore+' · idade '+_dbgAgeH+'h<br>' +
+            'views '+(vibe.viewCount||0)+' · watch médio '+(vibe.avgWatchSeconds||0).toFixed(1)+'s ('+(vibe.watchSamples||0)+' amostras)<br>' +
+            'likes '+(vibe.likes||0)+' · fogo '+(vibe.fireTotal||0) +
+          '</div>';
+        }
         html += '<div class="vibe-slide" data-vibe-idx="'+idx+'">' +
           '<video class="vibe-video" id="vibeVideo-'+idx+'" src="'+vibe.videoUrl+'" playsinline webkit-playsinline loop preload="auto"></video>' +
           '<div class="vibe-mute-layer"></div>' +
+          debugBadge +
           '<div class="vibe-doubletap-heart" id="vibeDTHeart-'+idx+'">'+sparkleIcon("like",90,"#fff")+'</div>' +
           '<button class="mute-btn" style="bottom:auto;top:calc(env(safe-area-inset-top,0px) + 14px);" data-vibe-mute-idx="'+idx+'" title="Som">' +
             '<span id="vibeMuteIcon-'+idx+'">'+sparkleIcon("volumeOn",20)+'</span>' +
@@ -20140,10 +20231,18 @@ var VibesModule = {
         if (iconEl) iconEl.innerHTML = sparkleIcon(video.muted ? "volumeOff" : "volumeOn", 20);
       });
     });
+    // Botão TEMPORÁRIO de debug do ranking (2.1) — liga/desliga o selo
+    // com score/views/tempo médio em cada vibe.
+    appEl.querySelectorAll("[data-vibe-debug-toggle]").forEach(function(btn) {
+      btn.addEventListener("click", function(e) {
+        e.stopPropagation();
+        self._debugRanking = !self._debugRanking;
+        render();
+      });
+    });
   },
 
-  downloadVibe: function(vibe) {
-    var url = vibe.videoUrl;
+  downloadVibe: function(vibe) {    var url = vibe.videoUrl;
     if (!url) return;
     try {
       var a = document.createElement("a");
