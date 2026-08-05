@@ -6366,7 +6366,24 @@ var FB = {
   // pra parar de precisar editar o banco na mão.
   loadReports: function() {
     if (!_idToken) return Promise.resolve([]);
-    return fsList("reports").then(function(docs) {
+    // FIX (Central de Moderação: "não foi possível carregar: não autorizado"):
+    // o fs-gateway do Supabase só libera caminhos do próprio uid, então
+    // listar a coleção inteira "reports" volta como "não autorizado".
+    // Aqui, se o Supabase recusar, tentamos ler direto do Firebase
+    // (ignorando o throttle, porque é uma tela manual do dono do app) e
+    // só desistimos se OS DOIS falharem — aí com uma mensagem que diz
+    // qual dos dois recusou, pra dar pra consertar sem console.
+    function loadRaw() {
+      return fsList("reports").catch(function(errSb) {
+        return _fsListFirebase("reports").catch(function(errFb) {
+          var m1 = (errSb && errSb.message) || String(errSb || "erro");
+          var m2 = (errFb && (errFb.message || errFb.status)) || String(errFb || "erro");
+          var e = new Error("Supabase (fs-gateway) recusou a lista de denúncias (" + m1 + ") e o Firebase também (" + m2 + "). Libere a coleção \"reports\" para o dono do app no fs-gateway ou nas Rules do Firestore.");
+          throw e;
+        });
+      });
+    }
+    return loadRaw().then(function(docs) {
       return docs.map(function(d) {
         return {
           id: d._id,
