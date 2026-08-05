@@ -19977,6 +19977,73 @@ var VibesModule = {
     '</div>';
   },
 
+  // 2.3 (sinais negativos) — abre/fecha o menu "⋯" SEM chamar o render()
+  // geral do app. O motivo: chamar render() na página de Vibes recria
+  // TODOS os elementos <video> do zero (mesmo os que não mudaram), o que
+  // faz a tela ficar preta e travar por um instante enquanto os vídeos
+  // recarregam. Inserindo/removendo só o menu direto no DOM, isso não
+  // acontece — a vibe some/o menu fecha na hora, sem recarregar nada.
+  openActionSheet: function(idx) {
+    var pageEl = appEl.querySelector(".vibes-page");
+    if (!pageEl) return;
+    this._actionSheetIdx = idx;
+    pageEl.insertAdjacentHTML("beforeend", this.renderActionSheet(idx));
+    this.bindActionSheetDom();
+  },
+  closeActionSheet: function() {
+    this._actionSheetIdx = null;
+    var overlay = appEl.querySelector("[data-vibe-sheet-overlay]");
+    if (overlay) overlay.remove();
+  },
+  // Esconde uma vibe na hora (pausa o vídeo e some com o slide) sem
+  // re-renderizar as outras — é isso que faz "não tenho interesse" /
+  // "denunciar" / "bloquear" parecerem instantâneos.
+  hideVibeSlideEl: function(idx) {
+    var slideEl = appEl.querySelector('.vibe-slide[data-vibe-idx="'+idx+'"]');
+    if (!slideEl) return;
+    var vid = slideEl.querySelector("video");
+    if (vid) { try { vid.pause(); } catch (e) {} }
+    slideEl.style.display = "none";
+  },
+  bindActionSheetDom: function() {
+    var self = this;
+    var overlay = appEl.querySelector("[data-vibe-sheet-overlay]");
+    if (!overlay) return;
+    overlay.addEventListener("click", function(e) {
+      if (e.target === overlay) self.closeActionSheet();
+    });
+    var cancelBtn = overlay.querySelector("[data-vibe-sheet-cancel]");
+    if (cancelBtn) cancelBtn.addEventListener("click", function() { self.closeActionSheet(); });
+    overlay.querySelectorAll("[data-vibe-sheet-action]").forEach(function(item) {
+      item.addEventListener("click", function() {
+        var action = item.getAttribute("data-vibe-sheet-action");
+        var idx = self._actionSheetIdx;
+        var vibe = self.vibes[idx];
+        self.closeActionSheet();
+        if (!vibe) return;
+        if (action === "notinterested") {
+          if (typeof FB !== "undefined" && FB.logEvent) FB.logEvent(vibe.id, "not_interested", null);
+          markVibeNotInterested(vibe.id);
+          self.hideVibeSlideEl(idx);
+          showToast("Vamos mostrar menos vídeos assim.");
+        } else if (action === "report") {
+          if (typeof FB !== "undefined" && FB.reportVibe) {
+            FB.reportVibe(vibe.id, vibe.userId, vibe.caption).catch(function(err) {
+              console.error("Erro ao registrar denúncia da vibe:", err);
+            });
+          }
+          markVibeNotInterested(vibe.id);
+          self.hideVibeSlideEl(idx);
+          showToast(toastWithIcon("Vibe denunciada. Vamos analisar.", "success"), true);
+        } else if (action === "block") {
+          blockUserId(vibe.userId);
+          self.vibes.forEach(function(v, i) { if (v.userId === vibe.userId) self.hideVibeSlideEl(i); });
+          showToast("Você bloqueou @" + (vibe.username || "") + ".");
+        }
+      });
+    });
+  },
+
   renderCommentsSheet: function(vibeId) {
     var vibe = this.vibes.find(function(v){ return v.id === vibeId; });
     if (!vibe) return "";
@@ -20313,58 +20380,22 @@ var VibesModule = {
       });
     });
 
-    // Botão "⋯" — abre o menu de sinais negativos (2.3) da vibe
+    // Botão "⋯" — abre o menu de sinais negativos (2.3) da vibe. Usa
+    // openActionSheet (insere só o menu no DOM) em vez de render(), pra
+    // não recarregar todos os vídeos e travar a tela.
     appEl.querySelectorAll("[data-vibe-more-idx]").forEach(function(btn) {
       btn.addEventListener("click", function(e) {
         e.stopPropagation();
-        self._actionSheetIdx = parseInt(btn.getAttribute("data-vibe-more-idx"), 10);
-        render();
+        self.openActionSheet(parseInt(btn.getAttribute("data-vibe-more-idx"), 10));
       });
     });
-
-    // Menu de sinais negativos: fechar (clique fora / cancelar) e as ações
-    var vibeSheetOverlay = appEl.querySelector("[data-vibe-sheet-overlay]");
-    if (vibeSheetOverlay) vibeSheetOverlay.addEventListener("click", function(e) {
-      if (e.target === vibeSheetOverlay) { self._actionSheetIdx = null; render(); }
-    });
-    var vibeSheetCancel = appEl.querySelector("[data-vibe-sheet-cancel]");
-    if (vibeSheetCancel) vibeSheetCancel.addEventListener("click", function() {
-      self._actionSheetIdx = null; render();
-    });
-    appEl.querySelectorAll("[data-vibe-sheet-action]").forEach(function(item) {
-      item.addEventListener("click", function() {
-        var action = item.getAttribute("data-vibe-sheet-action");
-        var vibe = self.vibes[self._actionSheetIdx];
-        self._actionSheetIdx = null;
-        if (!vibe) { render(); return; }
-        if (action === "notinterested") {
-          // Sinal negativo real: registra o evento bruto (auditoria/
-          // futuras análises), marca a vibe como "não quero ver" (efeito
-          // imediato, local) e some ela do feed agora mesmo.
-          if (typeof FB !== "undefined" && FB.logEvent) FB.logEvent(vibe.id, "not_interested", null);
-          markVibeNotInterested(vibe.id);
-          self.vibes = self.vibes.filter(function(v) { return v.id !== vibe.id; });
-          showToast("Vamos mostrar menos vídeos assim.");
-        } else if (action === "report") {
-          if (typeof FB !== "undefined" && FB.reportVibe) {
-            FB.reportVibe(vibe.id, vibe.userId, vibe.caption).catch(function(err) {
-              console.error("Erro ao registrar denúncia da vibe:", err);
-            });
-          }
-          markVibeNotInterested(vibe.id); // some do seu feed enquanto é analisada
-          self.vibes = self.vibes.filter(function(v) { return v.id !== vibe.id; });
-          showToast(toastWithIcon("Vibe denunciada. Vamos analisar.", "success"), true);
-        } else if (action === "block") {
-          blockUserId(vibe.userId);
-          self.vibes = self.vibes.filter(function(v) { return v.userId !== vibe.userId; });
-          showToast("Você bloqueou @" + (vibe.username||"") + ".");
-        }
-        render();
-      });
-    });
+    // Se a página foi renderizada inteira enquanto o menu já estava
+    // aberto (caso raro), religa os listeners dele.
+    if (this._actionSheetIdx != null) this.bindActionSheetDom();
   },
 
-  downloadVibe: function(vibe) {    var url = vibe.videoUrl;
+  downloadVibe: function(vibe) {
+    var url = vibe.videoUrl;
     if (!url) return;
     try {
       var a = document.createElement("a");
