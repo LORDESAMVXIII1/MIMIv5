@@ -2677,6 +2677,20 @@ function unblockUserId(userId) {
   saveBlockedUsers();
 }
 
+// 2.3 (sinais negativos) — "não tenho interesse" em vibes específicas.
+// Mesmo padrão do bloqueio de usuário: guarda local (por aparelho), sem
+// precisar de coluna nova no banco pra um MVP. Efeito imediato: some do
+// feed dessa pessoa a partir de agora.
+var NOT_INTERESTED_VIBES = {};
+(function() {
+  try { NOT_INTERESTED_VIBES = JSON.parse(localStorage.getItem("mimi_not_interested_vibes") || "{}"); } catch(e) { NOT_INTERESTED_VIBES = {}; }
+})();
+function isVibeNotInterested(vibeId) { return !!NOT_INTERESTED_VIBES[vibeId]; }
+function markVibeNotInterested(vibeId) {
+  NOT_INTERESTED_VIBES[vibeId] = true;
+  try { localStorage.setItem("mimi_not_interested_vibes", JSON.stringify(NOT_INTERESTED_VIBES)); } catch(e) {}
+}
+
 // ─── CATÁLOGO DE LIVROS (usado em Buscar livros / Escanear ISBN / Meus livros) ───
 var BOOKS_CATALOG = [
   { catId:"c1", title:"Pai Rico Pai Pobre", author:"Robert T. Kiyosaki", color:"linear-gradient(160deg,#2b2b1f,#4a4630)", textColor:"#e8c96a", rating:4.8, isbn:"9788576843877" },
@@ -6320,6 +6334,34 @@ var FB = {
   },
 
   // Registrar denúncia de publicação. Mesmo padrão do reportComment.
+  // 2.3 (sinais negativos): denúncia de vibe, mesmo padrão do reportPost.
+  reportVibe: function(vibeId, targetAuthorId, caption) {
+    if (!_idToken || !_fbUid) return Promise.reject("Not authenticated");
+    var id = uid();
+    var reporter = USERS[ME_ID] || ME || {};
+    var targetUser = USERS[targetAuthorId] || {};
+    sendReportEmail({
+      subject: "Denúncia de vibe no MIMI",
+      "Tipo": "Vibe",
+      "Denunciado por": (reporter.name || "Usuário") + " (" + ME_ID + ")",
+      "Autor da vibe": (targetUser.name || "Usuário desconhecido") + " (" + (targetAuthorId || "?") + ")",
+      "Conteúdo denunciado": (caption || "").slice(0, 500),
+      "Vibe ID": vibeId
+    });
+    return fsSet("reports/" + id, {
+      type: "vibe",
+      status: "pending",
+      reason: "outro", // categoria fechada — UI de escolha de motivo fica pra depois
+      vibeId: vibeId,
+      reporterId: ME_ID,
+      targetAuthorId: targetAuthorId || null,
+      contentSnapshot: (caption || "").slice(0, 500),
+      createdAt: new Date().toISOString(),
+      reviewedBy: null,
+      reviewedAt: null
+    });
+  },
+
   reportPost: function(postId, targetAuthorId, postText) {
     if (!_idToken || !_fbUid) return Promise.reject("Not authenticated");
     var id = uid();
@@ -19711,6 +19753,9 @@ var VibesModule = {
   vibesByUser: {}, // { userId: [vibe1, vibe2, ...] }
   currentSlide: 0,
   commentsFor: null, // id da vibe com o painel de comentários aberto (ou null)
+  // Índice da vibe com o menu (⋯) aberto — "não tenho interesse",
+  // "denunciar", "bloquear" (sinais negativos, 2.3).
+  _actionSheetIdx: null,
   // Debug TEMPORÁRIO do ranking (2.1) — mostra score/views/tempo médio em
   // cada vibe pra conferir se o novo ranking está funcionando de verdade,
   // sem precisar de devtools (você só tem acesso pelo celular). Toggle
@@ -19740,6 +19785,12 @@ var VibesModule = {
     self._loading = true;
     if (state.page === "vibes") render();
     FB.loadVibes().then(function(vibes) {
+      // 2.3 (sinais negativos): tira do feed o que a pessoa já disse que
+      // não quer ver — vídeo marcado como "não tenho interesse"/denunciado,
+      // ou de alguém que ela bloqueou.
+      vibes = vibes.filter(function(v) {
+        return !isVibeNotInterested(v.id) && !isUserBlocked(v.userId);
+      });
       // Ranking real (2.1/2.2): score híbrido de engajamento × decaimento
       // por idade + boost de conteúdo novo — não só curtida (ver
       // _vibeEngagementScore). Antes era por curtida crua, e antes disso
@@ -19889,6 +19940,9 @@ var VibesModule = {
             '<button class="vibe-download-btn" data-vibe-idx="'+idx+'">' +
               sparkleIcon("download",30,"#fff") +
             '</button>' +
+            '<button class="vibe-more-btn" data-vibe-more-idx="'+idx+'">' +
+              icoSvg("more",28,"#fff") +
+            '</button>' +
           '</div>' +
           '</div>';
       });
@@ -19901,8 +19955,26 @@ var VibesModule = {
     html += '</div>';
 
     if (this.commentsFor) html += this.renderCommentsSheet(this.commentsFor);
+    if (this._actionSheetIdx != null) html += this.renderActionSheet(this._actionSheetIdx);
     
     return html;
+  },
+
+  // 2.3 (sinais negativos) — menu "⋯" de cada vibe: não tenho interesse,
+  // denunciar, bloquear. Mesmo componente visual do action sheet dos
+  // posts (sheet-overlay/sheet-panel/sheet-item), pra ficar consistente.
+  renderActionSheet: function(idx) {
+    var vibe = this.vibes[idx];
+    if (!vibe) return "";
+    var isMine = vibe.userId === ME_ID;
+    return '<div class="sheet-overlay fade-in" data-vibe-sheet-overlay>' +
+      '<div class="sheet-panel">' +
+        '<div class="sheet-item" data-vibe-sheet-action="notinterested">'+icoSvg("close",20,"var(--text)")+' Não tenho interesse</div>' +
+        (!isMine ? '<div class="sheet-item danger" data-vibe-sheet-action="report">'+icoSvg("bell",20,"#e0507a")+' Denunciar</div>' : "") +
+        (!isMine ? '<div class="sheet-item danger" data-vibe-sheet-action="block">'+icoSvg("close",20,"#e0507a")+' Bloquear @'+esc(vibe.username||"")+'</div>' : "") +
+        '<div class="sheet-cancel" data-vibe-sheet-cancel>Cancelar</div>' +
+      '</div>' +
+    '</div>';
   },
 
   renderCommentsSheet: function(vibeId) {
@@ -20237,6 +20309,56 @@ var VibesModule = {
       btn.addEventListener("click", function(e) {
         e.stopPropagation();
         self._debugRanking = !self._debugRanking;
+        render();
+      });
+    });
+
+    // Botão "⋯" — abre o menu de sinais negativos (2.3) da vibe
+    appEl.querySelectorAll("[data-vibe-more-idx]").forEach(function(btn) {
+      btn.addEventListener("click", function(e) {
+        e.stopPropagation();
+        self._actionSheetIdx = parseInt(btn.getAttribute("data-vibe-more-idx"), 10);
+        render();
+      });
+    });
+
+    // Menu de sinais negativos: fechar (clique fora / cancelar) e as ações
+    var vibeSheetOverlay = appEl.querySelector("[data-vibe-sheet-overlay]");
+    if (vibeSheetOverlay) vibeSheetOverlay.addEventListener("click", function(e) {
+      if (e.target === vibeSheetOverlay) { self._actionSheetIdx = null; render(); }
+    });
+    var vibeSheetCancel = appEl.querySelector("[data-vibe-sheet-cancel]");
+    if (vibeSheetCancel) vibeSheetCancel.addEventListener("click", function() {
+      self._actionSheetIdx = null; render();
+    });
+    appEl.querySelectorAll("[data-vibe-sheet-action]").forEach(function(item) {
+      item.addEventListener("click", function() {
+        var action = item.getAttribute("data-vibe-sheet-action");
+        var vibe = self.vibes[self._actionSheetIdx];
+        self._actionSheetIdx = null;
+        if (!vibe) { render(); return; }
+        if (action === "notinterested") {
+          // Sinal negativo real: registra o evento bruto (auditoria/
+          // futuras análises), marca a vibe como "não quero ver" (efeito
+          // imediato, local) e some ela do feed agora mesmo.
+          if (typeof FB !== "undefined" && FB.logEvent) FB.logEvent(vibe.id, "not_interested", null);
+          markVibeNotInterested(vibe.id);
+          self.vibes = self.vibes.filter(function(v) { return v.id !== vibe.id; });
+          showToast("Vamos mostrar menos vídeos assim.");
+        } else if (action === "report") {
+          if (typeof FB !== "undefined" && FB.reportVibe) {
+            FB.reportVibe(vibe.id, vibe.userId, vibe.caption).catch(function(err) {
+              console.error("Erro ao registrar denúncia da vibe:", err);
+            });
+          }
+          markVibeNotInterested(vibe.id); // some do seu feed enquanto é analisada
+          self.vibes = self.vibes.filter(function(v) { return v.id !== vibe.id; });
+          showToast(toastWithIcon("Vibe denunciada. Vamos analisar.", "success"), true);
+        } else if (action === "block") {
+          blockUserId(vibe.userId);
+          self.vibes = self.vibes.filter(function(v) { return v.userId !== vibe.userId; });
+          showToast("Você bloqueou @" + (vibe.username||"") + ".");
+        }
         render();
       });
     });
