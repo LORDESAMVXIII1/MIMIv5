@@ -6362,6 +6362,30 @@ var FB = {
     });
   },
 
+  // Central de Moderação (painel, só o dono do app): lista os reports
+  // pra parar de precisar editar o banco na mão.
+  loadReports: function() {
+    if (!_idToken) return Promise.resolve([]);
+    return fsList("reports").then(function(docs) {
+      return docs.map(function(d) {
+        return {
+          id: d._id,
+          type: d.type || "post",
+          status: d.status || "pending",
+          reason: d.reason || "outro",
+          postId: d.postId || null,
+          vibeId: d.vibeId || null,
+          reporterId: d.reporterId || null,
+          targetAuthorId: d.targetAuthorId || null,
+          contentSnapshot: d.contentSnapshot || "",
+          createdAt: d.createdAt ? new Date(d.createdAt).getTime() : Date.now(),
+          reviewedBy: d.reviewedBy || null,
+          reviewedAt: d.reviewedAt ? new Date(d.reviewedAt).getTime() : null
+        };
+      }).sort(function(a, b) { return b.createdAt - a.createdAt; });
+    });
+  },
+
   reportPost: function(postId, targetAuthorId, postText) {
     if (!_idToken || !_fbUid) return Promise.reject("Not authenticated");
     var id = uid();
@@ -8104,6 +8128,7 @@ var state = {
   editProfileOpen: false,
   supportOpen: false,
   myAdsOpen: false, // tela privada "Meus Anúncios"
+  moderationPanelOpen: false, // tela privada "Central de Moderação" (só o dono do app)
   searchQuery: "",
   replyTarget: null,
   userSearchOpen: false,
@@ -8666,6 +8691,7 @@ function _renderImpl() {
 
   if (state.followListFor) html += renderFollowListPage();
   if (state.myAdsOpen) html += renderMyAdsPage();
+  if (state.moderationPanelOpen) html += renderModerationPage();
   if (state.publishMenu) html += renderPublishMenu();
   if (state.creating) html += renderCreatePost();
   if (musicSearch.open) html += renderMusicSearchModal();
@@ -8713,6 +8739,7 @@ function _renderImpl() {
 
   if (state.followListFor) bindFollowListPage();
   if (state.myAdsOpen) bindMyAdsPage();
+  if (state.moderationPanelOpen) bindModerationPage();
   if (state.publishMenu) bindPublishMenu();
   if (state.creating) bindCreatePost();
   if (musicSearch.open) bindMusicSearchModal();
@@ -9625,7 +9652,7 @@ function hasOpenOverlay() {
     state.editProfileOpen || state.supportOpen || state.subsOpen || state.viewingStoryIdx !== null ||
     activeCall || incomingCall || state.actionSheetPostId || state.profileSheetUserId ||
     state.confirmDialog || state.paywallDialog || state.addBooksSheetOpen || state.bookPicker ||
-    state.isbnScanOpen || state.bookAddDraft || state.bookActionFor ||
+    state.isbnScanOpen || state.bookAddDraft || state.bookActionFor || state.moderationPanelOpen ||
     document.querySelector("[data-story-comments-panel]")
   );
 }
@@ -16434,6 +16461,140 @@ function bindBookActionSheet() {
 // Anúncios (isAd:true) têm um único switch (adVisible) que liga/desliga a
 // visibilidade em tudo de uma vez: Feed, Perfil e Busca. Esta tela é onde
 // o dono vê todos os anúncios que criou e liga/desliga cada um.
+// Central de Moderação (só o dono do app) — reúne os reports pendentes
+// (posts e vibes) num painel com botão de ação, em vez de precisar
+// editar o banco na mão. Também mostra alguns números básicos de
+// engajamento acumulado (2.1) já que estão ali.
+var ModerationModule = {
+  reports: [],
+  metrics: null,
+  loading: false,
+  loaded: false,
+  load: function() {
+    if (this.loading) return;
+    this.loading = true;
+    var self = this;
+    Promise.all([FB.loadReports(), FB.loadVibes()]).then(function(results) {
+      self.reports = results[0];
+      var vibes = results[1];
+      var pending = 0, reviewed = 0, actioned = 0;
+      self.reports.forEach(function(r) {
+        if (r.status === "pending") pending++;
+        else if (r.status === "actioned") actioned++;
+        else reviewed++;
+      });
+      var totalViews = 0, totalWatch = 0, samples = 0;
+      vibes.forEach(function(v) {
+        totalViews += v.viewCount || 0;
+        totalWatch += v.totalWatchSeconds || 0;
+        samples += v.watchSamples || 0;
+      });
+      self.metrics = {
+        pending: pending, reviewed: reviewed, actioned: actioned,
+        totalVibes: vibes.length, totalViews: totalViews,
+        avgWatchSeconds: samples ? (totalWatch / samples) : 0
+      };
+      self.loaded = true;
+      self.loading = false;
+      render();
+    }).catch(function(err) {
+      console.error("Erro ao carregar painel de moderação:", err);
+      self.loading = false;
+      showToast("Não foi possível carregar o painel agora.");
+      render();
+    });
+  }
+};
+
+function renderModerationPage() {
+  var m = ModerationModule;
+  var html = '<div class="create-overlay fade-in" style="z-index:220;">' +
+    '<div class="create-header">' +
+      '<button class="icon-btn" data-close-moderation style="color:var(--sub);">'+icoSvg("back",22)+'</button>' +
+      '<span style="font-weight:800;font-size:16px;">Central de Moderação</span>' +
+      '<span style="width:22px;"></span>' +
+    '</div>' +
+    '<div class="create-body" style="padding:14px;">';
+
+  if (!m.loaded && m.loading) {
+    html += '<div class="search-empty">Carregando…</div></div></div>';
+    return html;
+  }
+
+  if (m.metrics) {
+    var mt = m.metrics;
+    html += '<div class="cfg-section-title">Números (2.1 — dados acumulados)</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px;">' +
+        _modMetricCard("Denúncias pendentes", mt.pending) +
+        _modMetricCard("Já revisadas", mt.reviewed + mt.actioned) +
+        _modMetricCard("Vibes no ar", mt.totalVibes) +
+        _modMetricCard("Views registrados", mt.totalViews) +
+        _modMetricCard("Watch médio", mt.avgWatchSeconds.toFixed(1) + "s") +
+      '</div>';
+  }
+
+  var pendingReports = m.reports.filter(function(r) { return r.status === "pending"; });
+  html += '<div class="cfg-section-title">Denúncias pendentes ('+pendingReports.length+')</div>';
+  if (!pendingReports.length) {
+    html += '<div class="search-empty">Nenhuma denúncia pendente. 🎀</div>';
+  } else {
+    pendingReports.forEach(function(r) {
+      var reporter = USERS[r.reporterId] || {};
+      var target = USERS[r.targetAuthorId] || {};
+      html += '<div class="cfg-item" style="align-items:flex-start;flex-direction:column;gap:8px;margin-bottom:12px;">' +
+        '<div class="cfg-item-label">'+(r.type === "vibe" ? "Vibe" : "Publicação")+' de @'+esc(target.name||"usuário desconhecido")+'</div>' +
+        '<div class="cfg-item-sub">Denunciado por @'+esc(reporter.name||"usuário")+' · '+new Date(r.createdAt).toLocaleString("pt-BR")+'</div>' +
+        (r.contentSnapshot ? '<div class="cfg-item-sub" style="font-style:italic;">"'+esc(r.contentSnapshot.slice(0,140))+'"</div>' : "") +
+        '<div class="row" style="gap:8px;">' +
+          '<button class="btn btn-sm btn-secondary" data-mod-action="keep" data-mod-report-id="'+r.id+'">Manter conteúdo</button>' +
+          '<button class="btn btn-sm" style="background:#e0507a;color:#fff;" data-mod-action="remove" data-mod-report-id="'+r.id+'">Remover conteúdo</button>' +
+        '</div>' +
+      '</div>';
+    });
+  }
+
+  html += '</div></div>';
+  return html;
+}
+function _modMetricCard(label, value) {
+  return '<div style="background:var(--bg);border-radius:12px;padding:12px;">' +
+    '<div style="font-size:20px;font-weight:800;">'+value+'</div>' +
+    '<div style="font-size:11.5px;color:var(--muted);">'+label+'</div>' +
+  '</div>';
+}
+function bindModerationPage() {
+  var closeBtn = appEl.querySelector("[data-close-moderation]");
+  if (closeBtn) closeBtn.addEventListener("click", function() {
+    state.moderationPanelOpen = false;
+    render();
+  });
+
+  if (!ModerationModule.loaded && !ModerationModule.loading) ModerationModule.load();
+
+  appEl.querySelectorAll("[data-mod-action]").forEach(function(btn) {
+    btn.addEventListener("click", function() {
+      var action = btn.getAttribute("data-mod-action");
+      var reportId = btn.getAttribute("data-mod-report-id");
+      var report = ModerationModule.reports.find(function(r) { return r.id === reportId; });
+      if (!report) return;
+      var collection = report.type === "vibe" ? "vibes" : "posts";
+      var docId = report.type === "vibe" ? report.vibeId : report.postId;
+      if (!docId) { showToast("Conteúdo original não encontrado (já pode ter sido excluído)."); return; }
+      var newStatus = action === "remove" ? "removed" : "published";
+      btn.disabled = true;
+      FB.setModerationStatus(collection, docId, newStatus, reportId).then(function() {
+        showToast(action === "remove" ? "Conteúdo removido." : "Conteúdo mantido no ar.");
+        ModerationModule.loaded = false; // força recarregar os números e a lista
+        ModerationModule.load();
+      }).catch(function(err) {
+        console.error("Erro ao aplicar ação de moderação:", err);
+        showToast("Não foi possível concluir agora. Tenta de novo.");
+        btn.disabled = false;
+      });
+    });
+  });
+}
+
 function renderMyAdsPage() {
   var myAds = posts.filter(function(p){ return p.authorId === ME_ID && p.isAd; });
   var html = '<div class="create-overlay fade-in" style="z-index:220;">' +
@@ -17693,6 +17854,19 @@ function renderSettingsPage() {
     icoSvg("share",16,"var(--muted)") +
   '</div>' +
 
+  // Moderação (só visível pro dono do app)
+  (isAppOwner(me) ?
+    '<div class="cfg-section-title">Moderação</div>' +
+    '<div class="cfg-item" data-open-moderation-panel style="cursor:pointer;">' +
+      '<div class="cfg-item-icon" style="background:#fff0f6;">'+icoSvg("bell",20,C.accent)+'</div>' +
+      '<div class="grow">' +
+        '<div class="cfg-item-label">Central de Moderação</div>' +
+        '<div class="cfg-item-sub">Denúncias pendentes e números de engajamento acumulado</div>' +
+      '</div>' +
+      icoSvg("share",16,"var(--muted)") +
+    '</div>'
+  : "") +
+
   // Manutenção (só visível pro dono do app, pra rodar o backfill do celular)
   (me.email === "franciscoviei123@gmail.com" ?
     '<div class="cfg-section-title">Manutenção</div>' +
@@ -17742,6 +17916,12 @@ function bindSettingsPage() {
   var openMyAdsBtn = appEl.querySelector("[data-open-my-ads]");
   if (openMyAdsBtn) openMyAdsBtn.addEventListener("click", function() {
     state.myAdsOpen = true;
+    render();
+  });
+
+  var openModerationBtn = appEl.querySelector("[data-open-moderation-panel]");
+  if (openModerationBtn) openModerationBtn.addEventListener("click", function() {
+    state.moderationPanelOpen = true;
     render();
   });
 
