@@ -3701,6 +3701,9 @@ var FIRE_AUTH_V2 = "https://identitytoolkit.googleapis.com/v2/accounts";
 
 // Token em memória (não persiste — usuário loga a cada sessão)
 var _idToken = null;
+// Sessão de uso — gerada uma vez por carregamento do app, usada só pra
+// agrupar interaction_events da mesma "visita" (base do ranking/1.2).
+var _mimiSessionId = "s_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 var _fbUid   = null;
 var _refreshToken = null;
 var _refreshPromise = null;
@@ -5396,6 +5399,9 @@ var FB = {
       adPlaces:  postData.adPlaces || null,
       likedBy:   [],
       fireTotal: 0,
+      // Estado de moderação (3.1): todo post nasce "published". Denúncias
+      // podem mover pra "under_review"/"removed" — ver FB.setModerationStatus.
+      moderationStatus: "published",
       createdAt: now,
       time:      now,
     };
@@ -5439,8 +5445,15 @@ var FB = {
         return (b.createdAt||"").localeCompare(a.createdAt||"");
       });
       // FIX: Remover apenas posts do usuário genérico "usuario"
-      posts = fsPosts.filter(function(p) { 
-        return p.authorId && p.authorId !== "usuario";
+      // + moderação (3.1): esconde posts removidos/em revisão de OUTROS
+      // usuários, mas o autor continua vendo o próprio post (senão ele
+      // "sumiria" sem explicação assim que fosse denunciado).
+      posts = fsPosts.filter(function(p) {
+        if (!p.authorId || p.authorId === "usuario") return false;
+        if (p.moderationStatus === "removed" || p.moderationStatus === "under_review") {
+          return p.authorId === ME_ID;
+        }
+        return true;
       });
       cachePostsSnapshot(posts);
       // TEMP DEBUG: confirmar no DevTools se a lista realmente veio vazia do Firestore.
@@ -5683,6 +5696,7 @@ var FB = {
         chunked:   true,
         chunkCount: chunks.length,
         likedBy:   [],
+        moderationStatus: "published",
         createdAt: now,
       };
       return fsAdd("vibes", chunkedData).then(function(doc){
@@ -5702,6 +5716,7 @@ var FB = {
       caption:   vibe.caption || "",
       videoUrl:  src,
       likedBy:   [],
+      moderationStatus: "published",
       createdAt: now,
     };
     return fsAdd("vibes", data).then(function(doc){
@@ -5728,7 +5743,15 @@ var FB = {
         }).catch(function(){ d.videoUrl = null; return d; });
       }));
     }).then(function(fullDocs){
-      return fullDocs.filter(function(d){ return d.videoUrl; }).map(function(d){
+      // moderação (3.1): mesmo critério do loadPosts — some da lista dos
+      // outros, mas o autor continua vendo a própria vibe.
+      return fullDocs.filter(function(d){
+        if (!d.videoUrl) return false;
+        if (d.moderationStatus === "removed" || d.moderationStatus === "under_review") {
+          return d.authorId === ME_ID;
+        }
+        return true;
+      }).map(function(d){
         var u = USERS[d.authorId] || {};
         var likedBy = d.likedBy || [];
         return {
@@ -6203,6 +6226,25 @@ var FB = {
     return fsDelete("posts/" + postId + "/comments/" + commentId);
   },
 
+  // Registra um evento de interação (view, watch_time, replay, skip...) na
+  // coleção "interaction_events" — base bruta pra depois virar sinal de
+  // ranking via agregação em batch. Fire-and-forget: nunca deve travar nem
+  // avisar o usuário se falhar, é telemetria, não ação crítica.
+  logEvent: function(contentId, eventType, value) {
+    if (!_idToken || !contentId) return;
+    var id = uid();
+    fsSet("interaction_events/" + id, {
+      userId: ME_ID,
+      contentId: contentId,
+      eventType: eventType,
+      value: (typeof value === "number") ? value : null,
+      sessionId: _mimiSessionId,
+      createdAt: new Date().toISOString()
+    }).catch(function(err) {
+      console.warn("⚠️ logEvent('" + eventType + "') falhou:", err && err.message || err);
+    });
+  },
+
   // Registrar denúncia de comentário. Guarda um "retrato" do conteúdo (texto,
   // autor) no momento da denúncia, já que o comentário pode ser editado ou
   // excluído depois — assim, quem for analisar ainda vê o que foi denunciado.
@@ -6225,12 +6267,15 @@ var FB = {
     return fsSet("reports/" + id, {
       type: "comment",
       status: "pending",
+      reason: "outro", // categoria fechada — UI de escolha de motivo fica pra depois
       postId: postId,
       commentId: commentId,
       reporterId: ME_ID,
       targetAuthorId: targetAuthorId || null,
       contentSnapshot: (commentText || "").slice(0, 500),
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      reviewedBy: null,
+      reviewedAt: null
     });
   },
 
@@ -6251,12 +6296,34 @@ var FB = {
     return fsSet("reports/" + id, {
       type: "post",
       status: "pending",
+      reason: "outro", // categoria fechada — UI de escolha de motivo fica pra depois
       postId: postId,
       reporterId: ME_ID,
       targetAuthorId: targetAuthorId || null,
       contentSnapshot: (postText || "").slice(0, 500),
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      reviewedBy: null,
+      reviewedAt: null
     });
+  },
+
+  // Ação de moderação (só você, por enquanto): move um post/vibe pra um
+  // novo moderationStatus e fecha o report relacionado, com trilha de
+  // auditoria (quem revisou e quando). Chame manualmente pelo console ou
+  // por um futuro painel — não é chamado automaticamente por reportPost.
+  setModerationStatus: function(collection, docId, status, reportId) {
+    if (!_idToken) return Promise.reject("Not authenticated");
+    var p = fsSet(collection + "/" + docId, { moderationStatus: status });
+    if (reportId) {
+      p = p.then(function(){
+        return fsSet("reports/" + reportId, {
+          status: status === "removed" ? "actioned" : "reviewed",
+          reviewedBy: ME_ID,
+          reviewedAt: new Date().toISOString()
+        });
+      });
+    }
+    return p;
   },
 
   // Carrega os comentários reais de um post a partir do Firestore.
@@ -16946,6 +17013,7 @@ function publishVibeItem(videoSrc, caption) {
     liked: false,
     likedBy: [],
     fireTotal: 0,
+    moderationStatus: "published",
     createdAt: Date.now()
   };
   showToast("Publicando sua vibe…");
@@ -19994,10 +20062,15 @@ var VibesModule = {
     if (self._vibesObserver) { self._vibesObserver.disconnect(); self._vibesObserver = null; } // limpa o observer da render anterior antes de criar outro
     if (typeof IntersectionObserver !== "undefined") {
       var slides = appEl.querySelectorAll(".vibe-slide");
+      // Base de coleta pra ranking (1.2): guarda quando cada vibe entrou em
+      // viewport, pra medir tempo assistido quando ela sair. Fica preso na
+      // instância do módulo (não no observer) pra sobreviver a re-renders.
+      self._vibeViewStarts = self._vibeViewStarts || {};
       var observer = new IntersectionObserver(function(entries) {
         entries.forEach(function(entry) {
           var idx = entry.target.getAttribute("data-vibe-idx");
           var video = entry.target.querySelector("video.vibe-video");
+          var vibe = (idx !== null && self.vibes) ? self.vibes[idx] : null;
           if (video && typeof video.play === "function") {
             if (entry.isIntersecting) {
               video.muted = false; // tenta tocar com som, igual ao player do Feed
@@ -20011,8 +20084,20 @@ var VibesModule = {
                   if (iconEl) iconEl.innerHTML = sparkleIcon("volumeOff", 20);
                 });
               }
+              if (vibe && vibe.id) {
+                self._vibeViewStarts[vibe.id] = Date.now();
+                if (typeof FB !== "undefined" && FB.logEvent) FB.logEvent(vibe.id, "view", null);
+              }
             } else {
               video.pause();
+              if (vibe && vibe.id && self._vibeViewStarts[vibe.id]) {
+                var seconds = (Date.now() - self._vibeViewStarts[vibe.id]) / 1000;
+                delete self._vibeViewStarts[vibe.id];
+                // Ignora "vistas" residuais de menos de meio segundo (scroll rápido)
+                if (seconds >= 0.5 && typeof FB !== "undefined" && FB.logEvent) {
+                  FB.logEvent(vibe.id, "watch_time", seconds);
+                }
+              }
             }
           }
         });
