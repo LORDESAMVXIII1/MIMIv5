@@ -16470,9 +16470,11 @@ var ModerationModule = {
   metrics: null,
   loading: false,
   loaded: false,
+  error: null,
   load: function() {
     if (this.loading) return;
     this.loading = true;
+    this.error = null;
     var self = this;
     Promise.all([FB.loadReports(), FB.loadVibes()]).then(function(results) {
       self.reports = results[0];
@@ -16498,9 +16500,15 @@ var ModerationModule = {
       self.loading = false;
       render();
     }).catch(function(err) {
+      // FIX: antes disso, uma falha aqui deixava loaded=false e
+      // loading=false, e o bind da página tentava carregar de novo a
+      // cada render — como o render() dispara uma animação de entrada no
+      // painel inteiro, isso piscava a tela sem parar (loop de retry).
+      // Agora guarda o erro (com a mensagem real, pra dar pra ler sem
+      // console) e SÓ tenta de novo se você tocar em "Tentar novamente".
       console.error("Erro ao carregar painel de moderação:", err);
+      self.error = (err && err.message) ? err.message : String(err);
       self.loading = false;
-      showToast("Não foi possível carregar o painel agora.");
       render();
     });
   }
@@ -16518,6 +16526,12 @@ function renderModerationPage() {
 
   if (!m.loaded && m.loading) {
     html += '<div class="search-empty">Carregando…</div></div></div>';
+    return html;
+  }
+
+  if (m.error) {
+    html += '<div class="search-empty" style="color:#e0507a;">Não foi possível carregar: '+esc(m.error)+'</div>' +
+      '<div style="text-align:center;margin-top:10px;"><button class="btn btn-sm btn-secondary" data-mod-retry>Tentar novamente</button></div></div></div>';
     return html;
   }
 
@@ -16569,7 +16583,12 @@ function bindModerationPage() {
     render();
   });
 
-  if (!ModerationModule.loaded && !ModerationModule.loading) ModerationModule.load();
+  if (!ModerationModule.loaded && !ModerationModule.loading && !ModerationModule.error) ModerationModule.load();
+
+  var retryBtn = appEl.querySelector("[data-mod-retry]");
+  if (retryBtn) retryBtn.addEventListener("click", function() {
+    ModerationModule.load();
+  });
 
   appEl.querySelectorAll("[data-mod-action]").forEach(function(btn) {
     btn.addEventListener("click", function() {
