@@ -18004,6 +18004,16 @@ function renderSettingsPage() {
     '</div>'
   : "") +
 
+  // 🔧 TESTE TEMPORÁRIO DE SEGURANÇA — REMOVER DEPOIS DE USAR
+  '<div class="cfg-section-title">Teste (temporário)</div>' +
+  '<div class="cfg-item" data-test-banner-guard style="cursor:pointer;">' +
+    '<div class="cfg-item-icon" style="background:#fff0f6;">'+icoSvg("share",20,C.accent)+'</div>' +
+    '<div class="grow">' +
+      '<div class="cfg-item-label">Testar bloqueio do banner</div>' +
+      '<div class="cfg-item-sub">Chama a API direto e mostra se o banner foi bloqueado</div>' +
+    '</div>' +
+  '</div>' +
+
   // Conta
   '<div class="cfg-section-title">Conta</div>' +
   '<div class="cfg-item danger" data-delete-account>' +
@@ -18092,6 +18102,39 @@ function bindSettingsPage() {
       showToast(toastWithIcon("Backfill falhou. Veja o detalhe em Configurações.", "error"), true);
       backfillBtn.removeAttribute("data-running");
       backfillBtn.style.opacity = "1";
+    });
+  });
+
+  // 🔧 TESTE TEMPORÁRIO DE SEGURANÇA — REMOVER DEPOIS DE USAR
+  var testBannerBtn = appEl.querySelector("[data-test-banner-guard]");
+  if (testBannerBtn) testBannerBtn.addEventListener("click", function() {
+    if (!confirm("Isso vai chamar a API direto, pulando a tela do app, pra testar se o banner ainda está protegido. Continuar?")) return;
+    fetch(SUPABASE_FUNCTION_URL, {
+      method: "POST",
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: "Bearer " + _idToken, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        op: "add",
+        collection: "posts",
+        data: {
+          authorId: ME_ID,
+          text: "[teste de segurança — pode apagar]",
+          isAd: true,
+          adVisible: true,
+          adPlaces: { feed:false, profile:false, search:false, banner:true, stories:false, vibes:false }
+        }
+      })
+    }).then(function(r) {
+      return r.text().then(function(t) { return { status: r.status, body: t }; });
+    }).then(function(res) {
+      var msg = "Status: " + res.status + "\n\n" + res.body;
+      if (res.status === 403) {
+        msg += "\n\n✅ BLOQUEADO como esperado.";
+      } else {
+        msg += "\n\n⚠️ NÃO foi bloqueado! Se esta conta NÃO é a sua (dono), me avisa AGORA. Se É a sua conta, isso é esperado — mas foi criado um anúncio de teste de verdade: vá em Configurações → Meus Anúncios e apague ele.";
+      }
+      alert(msg);
+    }).catch(function(err) {
+      alert("Erro ao testar: " + (err && err.message || err));
     });
   });
 
