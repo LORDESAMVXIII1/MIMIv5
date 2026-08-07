@@ -2082,10 +2082,10 @@ function renderTextWithMentions(text) {
 function renderBioWithMentions(text) { return renderTextWithMentions(text); }
 
 // Destaque no feed: publicações de assinantes MIMI Plus recebem prioridade,
-// aparecendo mais acima (e com mais frequência no topo) para quem as segue.
-// Mantém a ordem cronológica geral, mas "adianta" os posts de assinantes em
-// até PLUS_FEED_BOOST posições — efeito visível sem esconder quem não assina.
-var PLUS_FEED_BOOST = 3;
+// aparecendo mais acima. Antes era só "adianta N posições" na ordem
+// cronológica; agora que o Feed usa um score de engajamento (2.5, ver
+// _postEngagementScore), o boost virou um valor somado direto ao score.
+var PLUS_FEED_SCORE_BOOST = 15;
 // ── Anúncios: dono do app + locais de exibição (escopo GLOBAL) ──
 var APP_OWNER_EMAIL = "franciscoviei123@gmail.com";
 function isAppOwner(u) {
@@ -2115,19 +2115,69 @@ function adShowsIn(p, where) {
   return !!adPlacesOf(p)[where];
 }
 
+// 2.5 (algoritmo do Feed): mesma ideia das Vibes (_vibeEngagementScore),
+// adaptada ao que um post tem disponível — sem view/watch_time (isso só
+// é logado nas Vibes hoje), então o sinal aqui é curtida + fogo +
+// comentário. Comentário pesa mais que curtida/fogo: escrever um
+// comentário custa mais esforço, é sinal mais forte de interesse real.
+// Engajamento bruto (sem decaimento por idade) — separado pra poder ser
+// reaproveitado tanto no score normal quanto no boost de cold start (2.7).
+function _postRawEngagement(p) {
+  var commentCount = (p.comments || []).length;
+  return (p.likedBy ? p.likedBy.length : 0) * 1 +
+         (p.fireTotal || 0) * 1.5 +
+         commentCount * 2;
+}
+
+function _postEngagementScore(p) {
+  var ts = new Date(p.createdAt || 0).getTime();
+  var ageHours = Math.max(0, (Date.now() - (isNaN(ts) ? Date.now() : ts)) / 3600000);
+  // Mesmo decaimento "hot" das Vibes — sem isso, um post antigo muito
+  // curtido nunca mais saindo do topo do feed.
+  var decay = 1 / Math.pow(1 + ageHours / 12, 1.2);
+  var engagement = _postRawEngagement(p);
+  // Mesmo boost de conteúdo novo das Vibes — resolve o mesmo problema
+  // original (post recém-publicado, sem tempo de curtida, afundando).
+  var newBoost = ageHours < 2 ? 50 : (ageHours < 6 ? 20 : 0);
+  return engagement * decay + newBoost;
+}
+
 function getFeedOrder(list) {
   // Anúncios não competem mais pela ordenação normal (por curtidas) —
   // senão, como raramente recebem curtida, afundariam pro fim do feed.
   // Em vez disso são intercalados em posições fixas: depois da 3ª
   // publicação, e a cada 4 publicações dali em diante.
   list = list.filter(function(p){ return !isUserBlocked(p.authorId) && !p.isAd; });
-  var scored = list.map(function(p, i) {
+  // 2.5 (personalização): dispara em segundo plano a busca do perfil de
+  // afinidade (não bloqueia — ver ensureMyAffinityLoaded). Enquanto não
+  // volta, affinityMap fica vazio e o feed roda só no score global.
+  ensureMyAffinityLoaded();
+  var affinityMap = _myAffinityCache || {};
+  var maxAffinityWatch = _myAffinityMaxWatch || 0;
+  // 2.7 (cold start): enquanto o cache de afinidade ainda não carregou
+  // (_myAffinityCache === null) ou carregou vazio (usuário sem nenhum
+  // authorAffinity gravado), trata como cold start — em vez de deixar o
+  // feed dessa pessoa ao acaso, prioriza o que já é comprovadamente
+  // popular até ela construir gosto próprio.
+  var isColdStart = Object.keys(affinityMap).length === 0;
+  var maxRawEngagement = 0;
+  list.forEach(function(p) {
+    var raw = _postRawEngagement(p);
+    if (raw > maxRawEngagement) maxRawEngagement = raw;
+  });
+  var scored = list.map(function(p) {
     var author = USERS[p.authorId];
     var isPlus = author && isSubscriptionActive(author);
-    return { p: p, score: i - (isPlus ? PLUS_FEED_BOOST : 0) };
+    var score = _postEngagementScore(p) * _affinityMultiplier(p.authorId, affinityMap, maxAffinityWatch) +
+                _coldStartBoost(_postRawEngagement(p), maxRawEngagement, isColdStart);
+    if (isPlus) score += PLUS_FEED_SCORE_BOOST;
+    return { p: p, score: score };
   });
-  scored.sort(function(a, b) { return a.score - b.score; });
+  scored.sort(function(a, b) { return b.score - a.score; });
   var ordered = scored.map(function(s) { return s.p; });
+  // 2.6 (diversidade): evita empilhar vários posts do mesmo autor em
+  // sequência, mesmo que os dois tenham score alto.
+  ordered = _diversifyByAuthor(ordered, function(p) { return p.authorId; }, 2, 6);
 
   var adSlides = adsForPlace("feed");
   if (!adSlides.length) return ordered;
@@ -5072,6 +5122,34 @@ function _bumpVibeEngagementAggregate(vibeId, eventType, value) {
       patch.watchSamples = (v.watchSamples || 0) + 1;
     }
     fsSet("vibes/" + vibeId, patch, true).catch(function() {});
+    // 2.4 (personalização): além do agregado da vibe em si, também
+    // engorda o "perfil de afinidade" de QUEM assistiu com o autor do
+    // vídeo — guardado em users/{ME_ID}/authorAffinity/{autorId}. É uma
+    // coleção pequena (1 doc por autor já visto, não por vídeo), então
+    // dá pra carregar ela inteira no início do loadUserVibes sem custo.
+    // Não conta afinidade com o próprio autor (ver vídeo próprio não
+    // deveria inflar preferência por si mesmo).
+    if (v.userId && v.userId !== ME_ID) {
+      _bumpAuthorAffinity(v.userId, eventType, value);
+    }
+  }).catch(function() {});
+}
+
+// 2.4 (personalização): mesma lógica de agregação incremental do
+// _bumpVibeEngagementAggregate, só que por autor e por usuário — isso
+// que alimenta o multiplicador de afinidade em _personalizedVibeScore.
+function _bumpAuthorAffinity(authorId, eventType, value) {
+  var path = "users/" + ME_ID + "/authorAffinity/" + authorId;
+  fsGet(path).then(function(a) {
+    a = a || {};
+    var patch = {};
+    if (eventType === "view") {
+      patch.viewCount = (a.viewCount || 0) + 1;
+    } else {
+      if (typeof value !== "number" || value < 0) return;
+      patch.totalWatchSeconds = (a.totalWatchSeconds || 0) + value;
+    }
+    fsSet(path, patch, true).catch(function() {});
   }).catch(function() {});
 }
 
@@ -8541,6 +8619,7 @@ function _restorePlayingTrack(info) {
 }
 
 var _isRendering = false;
+var _lastRenderedHtml = null;
 var _renderQueued = false;
 var _navSwitching = false;
 var _messageIdToPreserve = null; // Usada para preservar posição ao reagir a mensagem
@@ -8671,6 +8750,7 @@ function _renderImpl() {
     return;
   }
   if (!state.user) {
+    _lastRenderedHtml = null;
     appEl.innerHTML = renderAuthPage();
     bindAuthPage();
     return;
@@ -8729,6 +8809,15 @@ function _renderImpl() {
   if (state.isbnScanOpen) html += renderIsbnScanOverlay();
   if (state.bookAddDraft) html += renderBookDraftSheet();
   if (state.bookActionFor) html += renderBookActionSheet();
+
+  // ANTI-PISCADA: se o HTML gerado é byte-a-byte igual ao que já está na
+  // tela, não recria o DOM. Os pollings (conversas, notificações, stories,
+  // reações, presença, denúncias) disparam render() a cada poucos segundos
+  // mesmo quando nada mudou; cada recriação apagava e remontava a tela
+  // inteira — que é exatamente a piscada. Sem mudança visual = sem rebuild,
+  // e os listeners já existentes continuam válidos.
+  if (html === _lastRenderedHtml && appEl.firstChild) return;
+  _lastRenderedHtml = html;
 
   var _focusedFieldInfo = _captureFocusedField();
   var _playingTrackInfo = _capturePlayingTrack();
@@ -19943,25 +20032,130 @@ var _vibeFireWriteChain = {};
 // decaimento por idade, mais um empurrão temporário pra conteúdo novo.
 // É essa última parte que resolve o problema original (vídeo recém-
 // postado, sem tempo de acumular curtida/view, sumindo no final do feed).
+// Engajamento bruto (sem decaimento por idade) — separado pra poder ser
+// reaproveitado tanto no score normal quanto no boost de cold start (2.7).
+function _vibeRawEngagement(v) {
+  // avgWatchSeconds é o sinal implícito (ninguém finge que assistiu) —
+  // pesa mais que curtida/fogo (explícitos, mas mais fáceis de inflar).
+  // viewCount sozinho pesa pouco: um view de 1s não deveria valer quase
+  // nada perto de alguém que ficou assistindo de verdade.
+  return (v.likes || 0) * 1 +
+         (v.fireTotal || 0) * 1.5 +
+         (v.viewCount || 0) * 0.2 +
+         (v.avgWatchSeconds || 0) * 3;
+}
+
 function _vibeEngagementScore(v) {
   var ageHours = Math.max(0, (Date.now() - (v.createdAt || Date.now())) / 3600000);
   // Decaimento "hot" (mesma ideia do Reddit): quanto mais velha a vibe,
   // menos peso o engajamento acumulado carrega — sem isso, uma vibe de
   // meses com muita curtida nunca sairia do topo mesmo parada.
   var decay = 1 / Math.pow(1 + ageHours / 12, 1.2);
-  // avgWatchSeconds é o sinal implícito (ninguém finge que assistiu) —
-  // pesa mais que curtida/fogo (explícitos, mas mais fáceis de inflar).
-  // viewCount sozinho pesa pouco: um view de 1s não deveria valer quase
-  // nada perto de alguém que ficou assistindo de verdade.
-  var engagement = (v.likes || 0) * 1 +
-                    (v.fireTotal || 0) * 1.5 +
-                    (v.viewCount || 0) * 0.2 +
-                    (v.avgWatchSeconds || 0) * 3;
+  var engagement = _vibeRawEngagement(v);
   // Boost de conteúdo novo: nas primeiras horas, a vibe ainda não teve
   // tempo de provar se engaja — sem isso ela fica presa no final até
   // acumular curtida, que é exatamente o bug que o Igor reportou.
   var newBoost = ageHours < 2 ? 50 : (ageHours < 6 ? 20 : 0);
   return engagement * decay + newBoost;
+}
+
+// 2.4 (personalização): multiplicador aplicado por cima do
+// _vibeEngagementScore, pra cada usuário ver o feed em uma ordem
+// diferente — hoje o score acima é o mesmo pra todo mundo. Duas fontes
+// de sinal:
+//   1) seguir o autor — sinal explícito e forte, ganha um empurrão fixo;
+//   2) afinidade acumulada (tempo assistido com aquele autor no
+//      passado) — normalizado contra o autor que essa pessoa mais
+//      assistiu, pra virar um número de 0 a 1 e não depender de escala.
+// affinityMap vem de "users/{ME_ID}/authorAffinity/*" (ver
+// _bumpAuthorAffinity) — uma coleção pequena, então dá pra carregar
+// inteira de uma vez em loadUserVibes em vez de calcular em cima da
+// "interaction_events" bruta, que só cresce.
+// 2.6 (diversidade de autores): pega uma lista já ordenada por score e
+// evita que o mesmo autor apareça empilhado — sem isso, se uma pessoa
+// postar várias coisas engajadas em sequência, ela "toma conta" do
+// feed por um tempo. Não reordena tudo do zero (isso jogaria fora o
+// score): pra cada posição, olha só os próximos `lookahead` itens da
+// lista já ordenada e adianta o primeiro que tiver autor diferente dos
+// últimos `minGap`; se ninguém no lookahead servir (ex: os últimos
+// itens são todos do mesmo autor), mantém a ordem por score mesmo.
+function _diversifyByAuthor(sortedList, getAuthorId, minGap, lookahead) {
+  minGap = minGap || 2;
+  lookahead = lookahead || 6;
+  var arr = sortedList.slice();
+  var result = [];
+  while (arr.length) {
+    var recentAuthors = result.slice(-minGap).map(getAuthorId);
+    var pick = 0;
+    var limit = Math.min(lookahead, arr.length);
+    for (var i = 0; i < limit; i++) {
+      if (recentAuthors.indexOf(getAuthorId(arr[i])) === -1) { pick = i; break; }
+    }
+    result.push(arr[pick]);
+    arr.splice(pick, 1);
+  }
+  return result;
+}
+
+// 2.7 (cold start): pra quem ainda não tem perfil de afinidade nenhum
+// (usuário novo, ou que simplesmente nunca assistiu Vibes o suficiente
+// pra gerar um authorAffinity), o multiplicador de afinidade já cai
+// neutro (1x pra todo mundo) — mas isso sozinho deixa o feed dessa
+// pessoa dependendo só da sorte de quem postou por último. Em vez de
+// deixar isso ao acaso, dá um empurrão extra pro que já é
+// comprovadamente popular (engajamento bruto alto, sem o desconto do
+// decaimento por idade) — assim quem chega agora vê primeiro o que já
+// foi validado por muita gente, até construir gosto próprio.
+function _coldStartBoost(rawEngagement, maxRawEngagement, isColdStart) {
+  if (!isColdStart || !maxRawEngagement) return 0;
+  return (rawEngagement / maxRawEngagement) * 40;
+}
+
+function _affinityMultiplier(authorId, affinityMap, maxAffinityWatch) {
+  var mult = 1;
+  if (isFollowing(authorId)) mult += 0.6;
+  // Cold start: com pouquíssimo histórico (poucos segundos assistidos
+  // no total), a proporção fica instável — um único vídeo assistido por
+  // acaso até o fim pareceria "afinidade máxima". Só aplica esse sinal
+  // quando já existe uma base mínima pra normalizar.
+  if (maxAffinityWatch >= 30) {
+    var a = affinityMap[authorId];
+    var watch = a ? (a.totalWatchSeconds || 0) : 0;
+    mult += (watch / maxAffinityWatch) * 1.0;
+  }
+  return mult;
+}
+
+// 2.5 (personalização no Feed de posts): mesmo perfil de afinidade que
+// já alimenta as Vibes (users/{ME_ID}/authorAffinity — construído a
+// partir do tempo assistido nas Vibes, mas reaproveitado aqui como
+// aproximação de "quanto essa pessoa gosta desse autor" de forma
+// geral). A diferença é que getFeedOrder é chamado direto dentro do
+// render() do Feed, sem await — então precisa de um cache síncrono em
+// vez de buscar tudo de novo a cada render. Na primeira vez que o Feed
+// abre, dispara a busca em segundo plano e usa mapa vazio (== ranking
+// sem personalizar, cai no score global) enquanto isso; quando a busca
+// volta, guarda em cache e manda re-renderizar.
+var _myAffinityCache = null; // null = ainda não carregado
+var _myAffinityMaxWatch = 0;
+var _myAffinityLoading = false;
+function ensureMyAffinityLoaded() {
+  if (_myAffinityCache !== null || _myAffinityLoading || !ME_ID) return;
+  _myAffinityLoading = true;
+  fsList("users/" + ME_ID + "/authorAffinity").then(function(docs) {
+    var map = {}; var maxWatch = 0;
+    (docs || []).forEach(function(a) {
+      map[a._id] = a;
+      if ((a.totalWatchSeconds || 0) > maxWatch) maxWatch = a.totalWatchSeconds;
+    });
+    _myAffinityCache = map;
+    _myAffinityMaxWatch = maxWatch;
+    _myAffinityLoading = false;
+    if (state.page === "feed") render();
+  }).catch(function() {
+    _myAffinityCache = {}; // não trava tentando de novo pra sempre
+    _myAffinityLoading = false;
+  });
 }
 
 var VibesModule = {
@@ -19976,7 +20170,7 @@ var VibesModule = {
   // cada vibe pra conferir se o novo ranking está funcionando de verdade,
   // sem precisar de devtools (você só tem acesso pelo celular). Toggle
   // manual pelo botão 🔧 no canto da tela — tirar depois que confirmar.
-  _debugRanking: false,
+
   
   init: function() {
     // Sem vibes de demonstração — a lista começa vazia e é preenchida a
@@ -20000,18 +20194,57 @@ var VibesModule = {
     self._userLoaded = true;
     self._loading = true;
     if (state.page === "vibes") render();
-    FB.loadVibes().then(function(vibes) {
+    // 2.4 (personalização): carrega o perfil de afinidade por autor
+    // (pequeno, 1 doc por autor já assistido) em paralelo com as vibes,
+    // pra poder aplicar o multiplicador antes de ordenar. Se a busca de
+    // afinidade falhar por qualquer motivo, segue com mapa vazio — a
+    // pessoa só perde a personalização daquele carregamento, não o
+    // ranking inteiro (fallback pro score global de sempre).
+    Promise.all([
+      FB.loadVibes(),
+      fsList("users/" + ME_ID + "/authorAffinity").catch(function(){ return []; })
+    ]).then(function(results) {
+      var vibes = results[0];
+      var affinityDocs = results[1] || [];
       // 2.3 (sinais negativos): tira do feed o que a pessoa já disse que
       // não quer ver — vídeo marcado como "não tenho interesse"/denunciado,
       // ou de alguém que ela bloqueou.
       vibes = vibes.filter(function(v) {
         return !isVibeNotInterested(v.id) && !isUserBlocked(v.userId);
       });
-      // Ranking real (2.1/2.2): score híbrido de engajamento × decaimento
-      // por idade + boost de conteúdo novo — não só curtida (ver
-      // _vibeEngagementScore). Antes era por curtida crua, e antes disso
-      // por data de publicação.
-      vibes.sort(function(a, b) { return _vibeEngagementScore(b) - _vibeEngagementScore(a); });
+      var affinityMap = {};
+      var maxAffinityWatch = 0;
+      affinityDocs.forEach(function(a) {
+        affinityMap[a._id] = a;
+        if ((a.totalWatchSeconds || 0) > maxAffinityWatch) maxAffinityWatch = a.totalWatchSeconds;
+      });
+      // 2.7 (cold start): sem nenhum authorAffinity gravado ainda, a
+      // pessoa não tem gosto conhecido — trata como usuário novo pra
+      // fins de ranking.
+      var isColdStart = affinityDocs.length === 0;
+      var maxRawEngagement = 0;
+      vibes.forEach(function(v) {
+        var raw = _vibeRawEngagement(v);
+        if (raw > maxRawEngagement) maxRawEngagement = raw;
+      });
+      // Ranking real (2.1/2.2) + personalização (2.4) + cold start (2.7):
+      // score híbrido de engajamento × decaimento por idade + boost de
+      // conteúdo novo, multiplicado por afinidade individual (seguir o
+      // autor / tempo já assistido com ele) — antes o mesmo score valia
+      // igual pra todo mundo; agora cada pessoa vê uma ordem diferente.
+      // Pra quem ainda não tem afinidade nenhuma, soma também um boost
+      // proporcional ao quanto aquela vibe já provou ser popular.
+      vibes.sort(function(a, b) {
+        var scoreA = _vibeEngagementScore(a) * _affinityMultiplier(a.userId, affinityMap, maxAffinityWatch) +
+                     _coldStartBoost(_vibeRawEngagement(a), maxRawEngagement, isColdStart);
+        var scoreB = _vibeEngagementScore(b) * _affinityMultiplier(b.userId, affinityMap, maxAffinityWatch) +
+                     _coldStartBoost(_vibeRawEngagement(b), maxRawEngagement, isColdStart);
+        return scoreB - scoreA;
+      });
+      // 2.6 (diversidade): mesmo problema do Feed — sem isso, um autor
+      // com vários vídeos engajados em sequência tomaria conta de um
+      // trecho inteiro do scroll das Vibes.
+      vibes = _diversifyByAuthor(vibes, function(v) { return v.userId; }, 2, 6);
       self.vibes = vibes;
       self._loading = false;
       render(); // perfil e outras telas também dependem de VibesModule.vibes (ver userVibes)
@@ -20078,13 +20311,6 @@ var VibesModule = {
     var adSlides = adsForPlace("vibes");
     var html = '<div class="vibes-page" style="position:relative;width:100%;height:100vh;height:100dvh;background:#000;overflow:hidden;">';
 
-    // Botão TEMPORÁRIO pra ligar/desligar o selo de debug do ranking (2.1).
-    // Fica sempre visível de propósito enquanto estamos testando — depois
-    // que confirmar os números, eu tiro esse botão e o selo junto.
-    html += '<button data-vibe-debug-toggle style="position:absolute;top:calc(env(safe-area-inset-top,0px) + 14px);left:14px;z-index:50;width:34px;height:34px;border-radius:50%;border:none;background:'+(this._debugRanking?"#ff4d6d":"rgba(0,0,0,.45)")+';display:flex;align-items:center;justify-content:center;">' +
-      icoSvg("settings",18,"#fff") +
-    '</button>';
-
     if (this.vibes.length === 0 && this._loading) {
       html += '<div style="display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;color:#fff;padding:20px;">' +
         '<div style="margin-bottom:20px;">'+icoSvg("sparkle",44,"var(--accentL,#ffb3d1)",true)+'</div>' +
@@ -20109,20 +20335,9 @@ var VibesModule = {
         if (!vUser && vibe.userId) self.fetchMissingUser(vibe.userId);
         var vAvatar = (vUser && vUser.avatar) || vibe.avatar || ("https://api.dicebear.com/7.x/avataaars/svg?seed=" + (vibe.userId || vibe.username));
         var vFrame = vUser ? getUserFrame(vUser) : null;
-        var debugBadge = "";
-        if (self._debugRanking) {
-          var _dbgAgeH = ((Date.now() - (vibe.createdAt||Date.now())) / 3600000).toFixed(1);
-          var _dbgScore = _vibeEngagementScore(vibe).toFixed(1);
-          debugBadge = '<div style="position:absolute;top:calc(env(safe-area-inset-top,0px) + 54px);left:14px;z-index:50;background:rgba(0,0,0,.65);color:#fff;font-size:11px;line-height:1.5;padding:8px 10px;border-radius:10px;font-family:monospace;">' +
-            'score '+_dbgScore+' · idade '+_dbgAgeH+'h<br>' +
-            'views '+(vibe.viewCount||0)+' · watch médio '+(vibe.avgWatchSeconds||0).toFixed(1)+'s ('+(vibe.watchSamples||0)+' amostras)<br>' +
-            'likes '+(vibe.likes||0)+' · fogo '+(vibe.fireTotal||0) +
-          '</div>';
-        }
         html += '<div class="vibe-slide" data-vibe-idx="'+idx+'">' +
           '<video class="vibe-video" id="vibeVideo-'+idx+'" src="'+vibe.videoUrl+'" playsinline webkit-playsinline loop preload="auto"></video>' +
           '<div class="vibe-mute-layer"></div>' +
-          debugBadge +
           '<div class="vibe-doubletap-heart" id="vibeDTHeart-'+idx+'">'+sparkleIcon("like",90,"#fff")+'</div>' +
           '<button class="mute-btn" style="bottom:auto;top:calc(env(safe-area-inset-top,0px) + 14px);" data-vibe-mute-idx="'+idx+'" title="Som">' +
             '<span id="vibeMuteIcon-'+idx+'">'+sparkleIcon("volumeOn",20)+'</span>' +
@@ -20586,16 +20801,6 @@ var VibesModule = {
         if (iconEl) iconEl.innerHTML = sparkleIcon(video.muted ? "volumeOff" : "volumeOn", 20);
       });
     });
-    // Botão TEMPORÁRIO de debug do ranking (2.1) — liga/desliga o selo
-    // com score/views/tempo médio em cada vibe.
-    appEl.querySelectorAll("[data-vibe-debug-toggle]").forEach(function(btn) {
-      btn.addEventListener("click", function(e) {
-        e.stopPropagation();
-        self._debugRanking = !self._debugRanking;
-        render();
-      });
-    });
-
     // Botão "⋯" — abre o menu de sinais negativos (2.3) da vibe. Usa
     // openActionSheet (insere só o menu no DOM) em vez de render(), pra
     // não recarregar todos os vídeos e travar a tela.
