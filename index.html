@@ -4697,6 +4697,88 @@ function fsDelete(path) {
 // 0001_lock_down_fs_mirror.sql). Ajuste o nome se você renomear a função.
 var SUPABASE_FUNCTION_URL = SUPABASE_URL + "/functions/v1/fs-gateway";
 
+// Edge Function que faz a ponte com o Backblaze B2 pra áudio de voz —
+// mesmo padrão de segurança do fs-gateway acima (verifica o idToken do
+// Firebase), mas conversa com o Backblaze em vez do Postgres. A chave do
+// Backblaze nunca aparece aqui no cliente, fica só como secret no servidor.
+var AUDIO_FUNCTION_URL = SUPABASE_URL + "/functions/v1/audio-gateway";
+
+var AudioGateway = (function () {
+  "use strict";
+
+  function headers() {
+    var h = { "apikey": SUPABASE_ANON_KEY, "Content-Type": "application/json" };
+    if (_idToken) h["Authorization"] = "Bearer " + _idToken;
+    return h;
+  }
+
+  function handle(res) {
+    return res.json().then(function (body) {
+      if (!res.ok) {
+        var err = new Error((body && (body.error + (body.detail ? ": " + body.detail : ""))) || ("audio-gateway HTTP " + res.status));
+        err.status = res.status;
+        throw err;
+      }
+      return body;
+    });
+  }
+
+  // Mesmo mecanismo de retry-após-renovar-token do fs-gateway (ver
+  // callGateway logo abaixo) — evita que um upload de áudio falhe só
+  // porque o idToken venceu no meio da gravação.
+  function call(payload) {
+    function attempt() {
+      return fetchWithTimeout(AUDIO_FUNCTION_URL, {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify(payload)
+      }, 20000);
+    }
+    return attempt().then(function (r) {
+      if (r.status === 401 && _refreshToken) {
+        return refreshIdToken().then(attempt).catch(function () { return r; });
+      }
+      return r;
+    }).then(handle);
+  }
+
+  function blobToBase64(blob) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onloadend = function () {
+        var result = reader.result || "";
+        var idx = result.indexOf(",");
+        resolve(idx === -1 ? result : result.slice(idx + 1));
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  return {
+    // Sobe o blob de áudio gravado pro Backblaze. Resolve com um
+    // "fileName" (caminho interno no bucket, não uma URL — o bucket é
+    // privado, a URL de reprodução só é gerada sob demanda, quando a
+    // pessoa aperta o play, em getPlaybackUrl()).
+    upload: function (blob, convoId) {
+      return blobToBase64(blob).then(function (b64) {
+        return call({
+          op: "upload",
+          convoId: convoId,
+          fileName: "voice.webm",
+          contentType: blob.type || "audio/webm",
+          dataBase64: b64
+        });
+      }).then(function (d) { return d.fileName; });
+    },
+    // Gera uma URL de reprodução temporária (válida por 1h) pro arquivo
+    // já salvo.
+    getPlaybackUrl: function (fileName, convoId) {
+      return call({ op: "getUrl", convoId: convoId, fileName: fileName }).then(function (d) { return d.url; });
+    }
+  };
+})();
+
 var SupabaseDB = (function () {
   "use strict";
 
@@ -12282,11 +12364,20 @@ function renderChatBubbleContent(m) {
       var h = 6 + Math.round(Math.sin(i*1.3)*6) + 6;
       bars += '<span data-audio-bar="'+m.id+'" data-bar-idx="'+i+'" style="height:'+h+'px;background:'+(m.me?'rgba(255,255,255,.35)':'rgba(0,0,0,.15)')+';"></span>';
     }
+    // Áudio salvo no Backblaze (mensagens novas) guarda um "fileName"
+    // interno em vez de uma URL pronta (bucket privado) — reconhecível
+    // porque sempre começa com "convos/". Áudio antigo (de antes da
+    // migração) continua com URL direta do Cloudinary, que segue
+    // funcionando normalmente. A URL de reprodução do Backblaze só é
+    // buscada quando a pessoa aperta o play (ver bindAudioPlayback).
+    var isB2Audio = typeof m.src === "string" && m.src.indexOf("convos/") === 0;
+    var audioSrcAttr = isB2Audio ? "" : ' src="'+esc(m.src)+'"';
+    var audioB2Attr = isB2Audio ? ' data-audio-b2path="'+esc(m.src)+'"' : "";
     return '<div class="audio-msg">' +
       '<button class="audio-play-btn" data-play-audio="'+m.id+'" style="background:'+(m.me?'rgba(255,255,255,.25)':'#fff0f6')+';color:'+(m.me?'#fff':'var(--accent)')+';">'+icoSvg("play",14,m.me?"#fff":C.accent,true)+'</button>' +
       '<div class="audio-wave" data-audio-wave="'+m.id+'" data-bar-color="'+(m.me?'rgba(255,255,255,.9)':'var(--accent)')+'">'+bars+'</div>' +
       '<span data-audio-time="'+m.id+'" data-full-duration="'+mm+':'+ss+'" style="font-size:11px;min-width:28px;text-align:right;color:'+(m.me?'rgba(255,255,255,.8)':'var(--muted)')+';">'+mm+':'+ss+'</span>' +
-      '<audio data-audio-el="'+m.id+'" src="'+esc(m.src)+'" preload="metadata"></audio>' +
+      '<audio data-audio-el="'+m.id+'"'+audioSrcAttr+audioB2Attr+' preload="metadata"></audio>' +
     '</div>';
   }
   return esc(m.text);
@@ -13225,25 +13316,47 @@ function bindAudioPlayback() {
     btn.addEventListener("click", function() {
       if (!audioEl) return;
       if (audioEl.paused) {
-        appEl.querySelectorAll("audio").forEach(function(a){ if (a!==audioEl) a.pause(); });
-        var ap = audioEl.play();
-        // FIX: antes o ícone virava "pause" incondicionalmente, mesmo que a
-        // Promise de play() fosse rejeitada (arquivo corrompido, formato não
-        // suportado, falha de rede) — o botão ficava travado em "pause" com
-        // o áudio mudo e sem nenhuma animação, e o erro era engolido em
-        // silêncio por um .catch(function(){}) vazio. Agora só troca o ícone
-        // DEPOIS de confirmar que a reprodução realmente começou, e reverte
-        // com um aviso se ela falhar.
-        if (ap && ap.then) {
-          ap.then(function() {
+        function startPlayback() {
+          appEl.querySelectorAll("audio").forEach(function(a){ if (a!==audioEl) a.pause(); });
+          var ap = audioEl.play();
+          // FIX: antes o ícone virava "pause" incondicionalmente, mesmo que a
+          // Promise de play() fosse rejeitada (arquivo corrompido, formato não
+          // suportado, falha de rede) — o botão ficava travado em "pause" com
+          // o áudio mudo e sem nenhuma animação, e o erro era engolido em
+          // silêncio por um .catch(function(){}) vazio. Agora só troca o ícone
+          // DEPOIS de confirmar que a reprodução realmente começou, e reverte
+          // com um aviso se ela falhar.
+          if (ap && ap.then) {
+            ap.then(function() {
+              btn.innerHTML = icoSvg("pause",14, btn.style.color || C.accent, true);
+            }).catch(function(err) {
+              console.error("❌ Falha ao reproduzir áudio:", id, err);
+              btn.innerHTML = icoSvg("play",14, btn.style.color || C.accent, true);
+              showToast(toastWithIcon("Não foi possível reproduzir este áudio.", "warning", "before"), true);
+            });
+          } else {
             btn.innerHTML = icoSvg("pause",14, btn.style.color || C.accent, true);
+          }
+        }
+        // FIX (áudio no Backblaze): mensagem salva depois da migração pro
+        // Backblaze não tem "src" pronto no <audio> — só um caminho
+        // privado (data-audio-b2path). Antes do primeiro play, busca uma
+        // URL de reprodução temporária via audio-gateway; depois disso
+        // fica guardada no próprio elemento (não busca de novo).
+        var b2path = audioEl.getAttribute("data-audio-b2path");
+        if (b2path && !audioEl.src) {
+          btn.disabled = true;
+          AudioGateway.getPlaybackUrl(b2path, state.activeConvoId).then(function(url) {
+            audioEl.src = url;
+            btn.disabled = false;
+            startPlayback();
           }).catch(function(err) {
-            console.error("❌ Falha ao reproduzir áudio:", id, err);
-            btn.innerHTML = icoSvg("play",14, btn.style.color || C.accent, true);
-            showToast(toastWithIcon("Não foi possível reproduzir este áudio.", "warning", "before"), true);
+            console.error("❌ Erro ao buscar URL de áudio no Backblaze:", err);
+            btn.disabled = false;
+            showToast(toastWithIcon("Não foi possível carregar este áudio.", "warning", "before"), true);
           });
         } else {
-          btn.innerHTML = icoSvg("pause",14, btn.style.color || C.accent, true);
+          startPlayback();
         }
       } else {
         audioEl.pause();
@@ -14781,30 +14894,40 @@ function beginAudioRecording(stream) {
       showToast("Áudio muito grande. Máximo 10MB.");
       return;
     }
-    cloudinaryWidget.uploadAudioBlobToCloudinary(blob, function(cloudinaryUrl) {
+    if (!_idToken) {
+      showToast("Faça login para enviar áudio.");
+      return;
+    }
+    // Áudio agora vai pro Backblaze B2 (via audio-gateway), não mais pro
+    // Cloudinary — ver AudioGateway, definido perto do fs-gateway. O que
+    // volta é um "fileName" interno (o bucket é privado), não uma URL
+    // pronta; a URL de reprodução só é buscada quando alguém dá play
+    // (ver bindAudioPlayback).
+    AudioGateway.upload(blob, _targetConvoId).then(function(fileName) {
       var chat = _chatRaw(_targetConvoId);
       var _audioCreatedAt = new Date().toISOString();
-      var msgObj = { id:uid(), _firestoreId:null, me:true, type:"audio", src:cloudinaryUrl, duration:duration, time:nowTime(), createdAt:_audioCreatedAt };
+      var msgObj = { id:uid(), _firestoreId:null, me:true, type:"audio", src:fileName, duration:duration, time:nowTime(), createdAt:_audioCreatedAt };
       chat.push(msgObj);
       var conv = CONVOS.find(function(c){ return c.id === _targetConvoId; });
       if (conv) { conv.last = "🎤 Áudio"; conv.time = "agora"; conv.lastSenderId = ME_ID; }
       render();
       scrollChatToBottom();
-      
-      if (_idToken) {
-        var _audioMembers = conv && conv.userId ? [ME_ID, conv.userId] : [ME_ID];
-        FB.sendMessage(_targetConvoId, { id:msgObj.id, type:"audio", audio:cloudinaryUrl, createdAt:_audioCreatedAt, members:_audioMembers, duration:duration }).then(function(doc){
-          if (doc && doc.name) {
-            var fsId = doc.name.split("/").pop();
-            msgObj._firestoreId = fsId;
-            var _conv = CONVOS.find(function(c){ return c.id === _targetConvoId; });
-            var _members = _conv && _conv.userId ? [ME_ID, _conv.userId] : [ME_ID];
-            fsSet("convos/"+ _targetConvoId, { lastMsg: "🎤 Áudio", lastTime: new Date().toISOString(), lastSenderId: ME_ID }).catch(function(){});
-          }
-        }).catch(function(){
-          showToast("Erro ao enviar áudio.");
-        });
-      }
+
+      var _audioMembers = conv && conv.userId ? [ME_ID, conv.userId] : [ME_ID];
+      FB.sendMessage(_targetConvoId, { id:msgObj.id, type:"audio", audio:fileName, createdAt:_audioCreatedAt, members:_audioMembers, duration:duration }).then(function(doc){
+        if (doc && doc.name) {
+          var fsId = doc.name.split("/").pop();
+          msgObj._firestoreId = fsId;
+          var _conv = CONVOS.find(function(c){ return c.id === _targetConvoId; });
+          var _members = _conv && _conv.userId ? [ME_ID, _conv.userId] : [ME_ID];
+          fsSet("convos/"+ _targetConvoId, { lastMsg: "🎤 Áudio", lastTime: new Date().toISOString(), lastSenderId: ME_ID }).catch(function(){});
+        }
+      }).catch(function(){
+        showToast("Erro ao enviar áudio.");
+      });
+    }).catch(function(err) {
+      console.error("❌ Erro ao subir áudio pro Backblaze:", err);
+      showToast("Erro ao enviar áudio.");
     });
     try {
       recordingStream.getTracks().forEach(function(t){ t.stop(); });
@@ -20293,7 +20416,7 @@ var VibesModule = {
     // já costumam vir no formato vertical das Vibes.
     var imgStyle = 'position:absolute;inset:0;width:100%;height:100%;max-width:100%;max-height:100%;object-fit:contain;background:#000;display:block;';
     var media = ad.video
-      ? '<video class="vibe-video" src="'+ad.video+'" playsinline webkit-playsinline loop muted autoplay preload="auto" style="'+videoStyle+'"></video>'
+      ? '<video class="vibe-video" src="'+ad.video+'" playsinline webkit-playsinline loop muted preload="metadata" style="'+videoStyle+'"></video>'
       : '<img class="vibe-video" src="'+ad.img+'" alt="" style="'+imgStyle+'">';
     return '<div class="vibe-slide vibe-slide-ad" style="position:relative;width:100%;height:100%;background:#000;overflow:hidden;">' +
       media +
@@ -20350,7 +20473,7 @@ var VibesModule = {
         var vAvatar = (vUser && vUser.avatar) || vibe.avatar || ("https://api.dicebear.com/7.x/avataaars/svg?seed=" + (vibe.userId || vibe.username));
         var vFrame = vUser ? getUserFrame(vUser) : null;
         html += '<div class="vibe-slide" data-vibe-idx="'+idx+'">' +
-          '<video class="vibe-video" id="vibeVideo-'+idx+'" src="'+vibe.videoUrl+'" playsinline webkit-playsinline loop preload="auto"></video>' +
+          '<video class="vibe-video" id="vibeVideo-'+idx+'" src="'+vibe.videoUrl+'" playsinline webkit-playsinline loop preload="metadata"></video>' +
           '<div class="vibe-mute-layer"></div>' +
           '<div class="vibe-doubletap-heart" id="vibeDTHeart-'+idx+'">'+sparkleIcon("like",90,"#fff")+'</div>' +
           '<button class="mute-btn" style="bottom:auto;top:calc(env(safe-area-inset-top,0px) + 14px);" data-vibe-mute-idx="'+idx+'" title="Som">' +
