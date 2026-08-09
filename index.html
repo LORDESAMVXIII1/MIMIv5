@@ -9872,7 +9872,12 @@ function hasOpenOverlay() {
 function optimizeCloudinaryVideoUrl(src) {
   if (!src || src.indexOf("res.cloudinary.com") === -1) return src;
   if (src.indexOf("/upload/q_auto") !== -1 || src.indexOf("/upload/f_auto") !== -1) return src;
-  return src.replace("/upload/", "/upload/q_auto,f_auto/");
+  // FIX (perf/armazenamento): além de qualidade/formato automáticos, agora
+  // também cap de resolução em 720p — vídeo vertical de celular não precisa
+  // de mais que isso, e o Cloudinary entrega (e cacheia) essa versão menor
+  // sem reprocessar nada no upload, então isso vale tanto pra vídeos novos
+  // quanto pros que já estavam salvos antes dessa mudança.
+  return src.replace("/upload/", "/upload/q_auto,f_auto,w_720,c_limit/");
 }
 function renderMimiPlayer(src, postId) {
   var optimizedSrc = optimizeCloudinaryVideoUrl(src);
@@ -17446,14 +17451,52 @@ function bindPublishMenu() {
         showToast(toastWithIcon("Vídeo muito grande (máx. ~20MB, uns 30s). Grave mais curto ou em qualidade menor.", "warning", "before"), true);
         return;
       }
-      var reader = new FileReader();
-      reader.onload = function() {
+      // FIX (armazenamento/performance): antes o vídeo ia direto pro estado
+      // como base64 (readAsDataURL) e o FB.createVibe salvava esse base64
+      // em chunks no Firestore/Supabase — pesado pra banco e sem nenhuma
+      // compressão. Agora, assim como imagem/vídeo do Feed e do chat, sobe
+      // pro Cloudinary (cota que sobrou depois do áudio ter migrado pro
+      // Backblaze) e só guardamos a URL — bem mais leve, e a otimização
+      // automática (q_auto,f_auto,w_720) entra na entrega via
+      // optimizeCloudinaryVideoUrl, sem precisar reprocessar nada aqui.
+      checkVibeVideoDuration(file, function(duration) {
+        var VIBE_MAX_SECONDS = 60;
+        if (duration && duration > VIBE_MAX_SECONDS + 1) {
+          showToast(toastWithIcon("Vídeo muito longo (máx. 60s). Grave ou corte um trecho mais curto.", "warning", "before"), true);
+          return;
+        }
         state.publishMenu = false;
-        state.vibeDraft = { videoUrl: reader.result, caption: "" };
         render();
-      };
-      reader.readAsDataURL(file);
+        cloudinaryWidget.uploadDirectFile(file, "video", function(url) {
+          state.vibeDraft = { videoUrl: url, caption: "" };
+          render();
+        });
+      });
     });
+  }
+}
+
+// FIX: o limite de 60s das Vibes só existia como texto/aviso — o código só
+// checava tamanho em MB (que dá uns 30s), nunca a duração real do vídeo.
+// Lê a duração via metadata (sem baixar o arquivo inteiro) antes de subir,
+// e recusa vídeos longos de fato, não só grandes em MB.
+function checkVibeVideoDuration(file, callback) {
+  try {
+    var objUrl = URL.createObjectURL(file);
+    var probe = document.createElement("video");
+    probe.preload = "metadata";
+    var done = false;
+    function finish(duration) {
+      if (done) return;
+      done = true;
+      URL.revokeObjectURL(objUrl);
+      callback(duration);
+    }
+    probe.onloadedmetadata = function() { finish(probe.duration); };
+    probe.onerror = function() { finish(null); }; // não conseguiu ler — deixa passar, o cap de MB já ajuda
+    probe.src = objUrl;
+  } catch (e) {
+    callback(null);
   }
 }
 
@@ -20416,7 +20459,7 @@ var VibesModule = {
     // já costumam vir no formato vertical das Vibes.
     var imgStyle = 'position:absolute;inset:0;width:100%;height:100%;max-width:100%;max-height:100%;object-fit:contain;background:#000;display:block;';
     var media = ad.video
-      ? '<video class="vibe-video" src="'+ad.video+'" playsinline webkit-playsinline loop muted preload="metadata" style="'+videoStyle+'"></video>'
+      ? '<video class="vibe-video" src="'+optimizeCloudinaryVideoUrl(ad.video)+'" playsinline webkit-playsinline loop muted preload="metadata" style="'+videoStyle+'"></video>'
       : '<img class="vibe-video" src="'+ad.img+'" alt="" style="'+imgStyle+'">';
     return '<div class="vibe-slide vibe-slide-ad" style="position:relative;width:100%;height:100%;background:#000;overflow:hidden;">' +
       media +
@@ -20446,6 +20489,13 @@ var VibesModule = {
   renderPage: function() {
     var self = this;
     var adSlides = adsForPlace("vibes");
+    // FIX (item 3 do roadmap de performance): antes, TODO vídeo do feed de
+    // Vibes já nascia com src=... real no HTML, então o navegador começava
+    // a buscar metadata de todo mundo de uma vez, não só do que estava na
+    // tela. Agora só a vibe atual + a próxima adjacente entram com src de
+    // verdade; o resto nasce com data-src (sem download nenhum) e só recebe
+    // o src real quando o usuário chega perto (ver bindEvents/observer).
+    var activeVibeIdx = (typeof self._activeVibeIdx === "number") ? self._activeVibeIdx : 0;
     var html = '<div class="vibes-page" style="position:relative;width:100%;height:100vh;height:100dvh;background:#000;overflow:hidden;">';
 
     if (this.vibes.length === 0 && this._loading) {
@@ -20472,8 +20522,13 @@ var VibesModule = {
         if (!vUser && vibe.userId) self.fetchMissingUser(vibe.userId);
         var vAvatar = (vUser && vUser.avatar) || vibe.avatar || ("https://api.dicebear.com/7.x/avataaars/svg?seed=" + (vibe.userId || vibe.username));
         var vFrame = vUser ? getUserFrame(vUser) : null;
+        var optimizedVideoUrl = optimizeCloudinaryVideoUrl(vibe.videoUrl);
+        var isNearVibe = (idx === activeVibeIdx || idx === activeVibeIdx + 1);
+        var vibeVideoSrcAttr = isNearVibe
+          ? ' src="'+optimizedVideoUrl+'"'
+          : ' data-src="'+optimizedVideoUrl+'"';
         html += '<div class="vibe-slide" data-vibe-idx="'+idx+'">' +
-          '<video class="vibe-video" id="vibeVideo-'+idx+'" src="'+vibe.videoUrl+'" playsinline webkit-playsinline loop preload="metadata"></video>' +
+          '<video class="vibe-video" id="vibeVideo-'+idx+'"'+vibeVideoSrcAttr+' playsinline webkit-playsinline loop preload="metadata"></video>' +
           '<div class="vibe-mute-layer"></div>' +
           '<div class="vibe-doubletap-heart" id="vibeDTHeart-'+idx+'">'+sparkleIcon("like",90,"#fff")+'</div>' +
           '<button class="mute-btn" style="bottom:auto;top:calc(env(safe-area-inset-top,0px) + 14px);" data-vibe-mute-idx="'+idx+'" title="Som">' +
@@ -20871,6 +20926,20 @@ var VibesModule = {
           var vibe = (idx !== null && self.vibes) ? self.vibes[idx] : null;
           if (video && typeof video.play === "function") {
             if (entry.isIntersecting) {
+              // Vibe atual "oficialmente" em foco — guarda o índice (sobrevive
+              // a re-renders, ver renderPage) e acende o src real só da
+              // próxima vibe adjacente, que até aqui só tinha data-src.
+              if (idx !== null) {
+                self._activeVibeIdx = parseInt(idx, 10);
+                var nextVideo = document.getElementById("vibeVideo-" + (self._activeVibeIdx + 1));
+                if (nextVideo && !nextVideo.getAttribute("src")) {
+                  var pendingSrc = nextVideo.getAttribute("data-src");
+                  if (pendingSrc) {
+                    nextVideo.src = pendingSrc;
+                    nextVideo.load();
+                  }
+                }
+              }
               video.muted = false; // tenta tocar com som, igual ao player do Feed
               var playPromise = video.play();
               if (playPromise && playPromise.catch) {
