@@ -4900,8 +4900,8 @@ var ImageGateway = (function () {
 // assinada de verdade. Chamado no fim de render() e depois de qualquer
 // backgroundRender() que possa ter introduzido imagens novas na tela.
 function hydrateImages(root) {
-  root = root || appEl;
-  if (!root) return;
+  root = root || appEl || document.body;
+  if (!root || !root.querySelectorAll) return;
   var imgs = root.querySelectorAll('img[data-imgpath]:not([data-hydrated])');
   for (var i = 0; i < imgs.length; i++) {
     (function (el) {
@@ -4923,6 +4923,41 @@ function hydrateImages(root) {
     })(bgs[j]);
   }
 }
+
+// Helper central: devolve os atributos certos para uma <img>, seja o
+// valor um filePath privado do ImageKit (vai como data-imgpath e é
+// hidratado depois) ou uma URL pronta (Cloudinary/dicebear/legado).
+function imgSrcAttrs(src) {
+  src = src || "";
+  return ImageGateway.isFilePath(src)
+    ? 'data-imgpath="'+esc(src)+'" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="'
+    : 'src="'+esc(src)+'"';
+}
+// Mesmo papel, mas para background-image (capas, avatares em <div>).
+function bgSrcAttrs(src) {
+  src = src || "";
+  if (!src) return "";
+  return ImageGateway.isFilePath(src)
+    ? ' data-bgpath="'+esc(src)+'"'
+    : ' style="background-image:url(\''+esc(src)+'\');background-size:cover;background-position:center;"';
+}
+// Rede de segurança: qualquer <img data-imgpath> / [data-bgpath] inserido
+// no DOM fora de render() (sheets, overlays, chat, listas dinâmicas) é
+// hidratado automaticamente, sem precisar chamar hydrateImages() na mão.
+(function () {
+  if (typeof MutationObserver !== "function") return;
+  var pending = null;
+  function flush() { pending = null; try { hydrateImages(document.body); } catch (e) {} }
+  var obs = new MutationObserver(function () {
+    if (pending) return;
+    pending = setTimeout(flush, 50);
+  });
+  function start() {
+    if (document.body) obs.observe(document.body, { childList: true, subtree: true });
+  }
+  if (document.body) start();
+  else document.addEventListener("DOMContentLoaded", start);
+})();
 
 var SupabaseDB = (function () {
   "use strict";
@@ -9562,7 +9597,7 @@ function renderStoryViewer() {
       'style="max-width:100%;max-height:100%;object-fit:contain;" ' +
       'onerror="console.error(\'Erro ao carregar video\')"></video>' +
       '<button class="icon-btn" data-story-mute-toggle style="position:absolute;bottom:78px;right:12px;color:#fff;background:rgba(0,0,0,.35);border-radius:50%;width:34px;height:34px;display:flex;align-items:center;justify-content:center;z-index:3;">'+icoSvg("micOff",18,"#fff")+'</button>'
-    : '<img src="'+esc(item.src)+'" alt="" data-story-media ' +
+    : '<img '+imgSrcAttrs(item.src)+' alt="" data-story-media ' +
       'style="max-width:100%;max-height:100%;object-fit:contain;" ' +
       'onerror="console.error(\'Erro ao carregar imagem\')">';
 
@@ -9613,7 +9648,7 @@ function renderStoryViewer() {
 function renderPhotoViewer() {
   return '<div class="photo-viewer fade-in" data-close-photo-viewer>' +
     '<button class="icon-btn photo-viewer-close" data-close-photo-viewer>'+icoSvg("close",20,"#fff")+'</button>' +
-    '<img src="'+esc(state.photoViewerUrl)+'" alt="" onclick="event.stopPropagation();">' +
+    '<img '+imgSrcAttrs(state.photoViewerUrl)+' alt="" onclick="event.stopPropagation();">' +
   '</div>';
 }
 
@@ -10874,7 +10909,7 @@ function renderPostCard(post, opts) {
   else if (post.audio) {
     mediaHtml = renderTrackPlayer(post);
   }
-  else if (post.img) mediaHtml = '<img class="post-img" src="'+post.img+'" alt="" data-open-post-media="'+post.id+'">';
+  else if (post.img) mediaHtml = '<img class="post-img" '+imgSrcAttrs(post.img)+' alt="" data-open-post-media="'+post.id+'">';
 
   var locHtml = post.loc ? '<div class="post-loc">'+sparkleIcon("loc",18)+' '+esc(post.loc)+'</div>' : "";
   var liked = postIsLiked(post);
@@ -12056,7 +12091,7 @@ function buildExploreBodyHtml(q) {
   });
   html += '</div><div class="explore-grid">';
   posts.forEach(function(p) {
-    if (p.img) html += '<div class="explore-cell" data-open-post="'+p.id+'" style="cursor:pointer;"><img src="'+p.img+'" alt=""></div>';
+    if (p.img) html += '<div class="explore-cell" data-open-post="'+p.id+'" style="cursor:pointer;"><img '+imgSrcAttrs(p.img)+' alt=""></div>';
   });
   EXPLORE_IMGS.forEach(function(id) { html += '<div class="explore-cell"><img src="https://images.unsplash.com/'+id+'?w=300&q=80" alt=""></div>'; });
   html += '</div>' + renderAppAdBanner("explore") + '<div style="height:16px;"></div>';
@@ -12249,12 +12284,12 @@ function renderAppAdBanner(slot) {
   var idx = Math.floor(Date.now() / 60000) % ads.length; // troca de anúncio a cada minuto
   var ad = ads[idx];
   var thumb = ad.img
-    ? '<img src="'+ad.img+'" alt="" style="width:52px;height:52px;border-radius:12px;object-fit:cover;flex-shrink:0;">'
+    ? '<img '+imgSrcAttrs(ad.img)+' alt="" style="width:52px;height:52px;border-radius:12px;object-fit:cover;flex-shrink:0;">'
     : '<div style="width:52px;height:52px;border-radius:12px;background:#e9fbf3;display:flex;align-items:center;justify-content:center;flex-shrink:0;">'+icoSvg("megaphone",22,"#1abc9c")+'</div>';
   var media = ad.video
     ? '<video src="'+ad.video+'" playsinline muted loop autoplay style="display:block;width:100%;height:auto;max-height:190px;object-fit:cover;"></video>'
     : (ad.img
-        ? '<img src="'+ad.img+'" alt="" style="display:block;width:100%;height:auto;max-height:190px;object-fit:cover;">'
+        ? '<img '+imgSrcAttrs(ad.img)+' alt="" style="display:block;width:100%;height:auto;max-height:190px;object-fit:cover;">'
         : '<div style="height:120px;background:#e9fbf3;display:flex;align-items:center;justify-content:center;">'+icoSvg("megaphone",26,"#1abc9c")+'</div>');
   return '<div class="app-ad-banner" data-ad-slot="'+esc(slot||"")+'" style="position:relative;margin:14px 0 0;width:100%;overflow:hidden;background:var(--surface);">' +
       '<div style="cursor:pointer;" data-open-app-ad="'+ad.id+'">' + media + '</div>' +
@@ -15717,7 +15752,7 @@ function renderIncomingCallScreen() {
     '<div class="call-status"><p class="call-sub">Chamada de voz</p></div>' +
     '<div class="call-avatar-wrap">' +
       '<div style="width:110px;height:110px;border-radius:50%;overflow:hidden;border:3px solid rgba(255,255,255,.3);animation:pulse 1.6s infinite;">' +
-        '<img src="'+esc(u.avatar)+'" style="width:100%;height:100%;object-fit:contain;object-position:center;display:block;margin:0 auto;">' +
+        '<img '+imgSrcAttrs(u.avatar)+' style="width:100%;height:100%;object-fit:contain;object-position:center;display:block;margin:0 auto;">' +
       '</div>' +
       '<div><p class="call-name">'+esc(u.name)+'</p><p class="call-sub">Chamada recebida…</p></div>' +
     '</div>' +
@@ -15820,7 +15855,7 @@ function renderCallScreen() {
         '<span class="call-avatar-dot" style="top:6px;right:18px;"></span>' +
         '<span class="call-avatar-dot" style="bottom:14px;left:2px;"></span>' +
         '<div style="position:relative;width:120px;height:120px;border-radius:50%;overflow:hidden;border:3px solid rgba(199,140,255,.5);box-shadow:0 0 40px rgba(179,77,255,.35);'+(activeCall.status==="calling"?"animation:pulse 1.6s infinite;":"")+'">' +
-          '<img src="'+esc(u.avatar)+'" style="width:100%;height:100%;object-fit:contain;object-position:center;display:block;margin:0 auto;">' +
+          '<img '+imgSrcAttrs(u.avatar)+' style="width:100%;height:100%;object-fit:contain;object-position:center;display:block;margin:0 auto;">' +
         '</div>' +
       '</div>' +
       '<div><p class="call-name">'+esc(u.name)+'</p><p class="call-sub-purple" data-call-timer>'+statusText+'</p></div>' +
@@ -16148,7 +16183,7 @@ function renderProfilePage(userId) {
         var thumb = p.img || (p.video ? videoThumbUrl(p.video) : "");
         var mediaHtml;
         if (thumb) {
-          mediaHtml = '<img src="'+thumb+'" alt="" style="width:100%;height:100%;object-fit:cover;display:block;"' +
+          mediaHtml = '<img '+imgSrcAttrs(thumb)+' alt="" style="width:100%;height:100%;object-fit:cover;display:block;"' +
             (p.video ? ' onerror="mimiThumbFallback(this,\''+esc(p.video).replace(/'/g,"&#39;")+'\')"' : '') + '>';
         } else if (p.video) {
           mediaHtml = '<video src="'+esc(p.video)+'" muted preload="metadata" playsinline style="width:100%;height:100%;object-fit:cover;display:block;"></video>';
@@ -17064,7 +17099,7 @@ function renderMyAdsPage() {
     html += '<div class="search-empty">Você ainda não criou nenhum anúncio.</div>';
   } else {
     myAds.forEach(function(p) {
-      var thumb = p.img ? '<img src="'+p.img+'" style="width:56px;height:56px;border-radius:10px;object-fit:cover;flex-shrink:0;">' :
+      var thumb = p.img ? '<img '+imgSrcAttrs(p.img)+' style="width:56px;height:56px;border-radius:10px;object-fit:cover;flex-shrink:0;">' :
         p.video ? '<video src="'+p.video+'" style="width:56px;height:56px;border-radius:10px;object-fit:cover;flex-shrink:0;"></video>' :
         '<div style="width:56px;height:56px;border-radius:10px;background:var(--bg);flex-shrink:0;"></div>';
       html += '<div class="cfg-item" style="align-items:center;margin-bottom:10px;">' +
@@ -20685,7 +20720,7 @@ var VibesModule = {
     var imgStyle = 'position:absolute;inset:0;width:100%;height:100%;max-width:100%;max-height:100%;object-fit:contain;background:#000;display:block;';
     var media = ad.video
       ? '<video class="vibe-video" src="'+optimizeCloudinaryVideoUrl(ad.video)+'" playsinline webkit-playsinline loop muted preload="metadata" style="'+videoStyle+'"></video>'
-      : '<img class="vibe-video" src="'+ad.img+'" alt="" style="'+imgStyle+'">';
+      : '<img class="vibe-video" '+imgSrcAttrs(ad.img)+' alt="" style="'+imgStyle+'">';
     return '<div class="vibe-slide vibe-slide-ad" style="position:relative;width:100%;height:100%;background:#000;overflow:hidden;">' +
       media +
       '<div class="vibe-info">' +
