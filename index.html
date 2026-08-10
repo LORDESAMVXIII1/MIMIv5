@@ -2244,8 +2244,16 @@ function avatarHtml(src, size, online, ring, plusRing, ringColors, themeKey, fra
   var ringClass = ring ? "avatar-ring-accent" : "avatar-ring";
   var wrapClass = plusRing ? ("avatar-plus-ring-wrap" + (themeKey === "fire" ? " theme-fire" : "")) : "";
   var themeVar = plusRing && ringColors ? "--ring-colors:"+ringColors+";" : "";
+  // Se `src` é um filePath do ImageKit (novo formato, privado), a tag
+  // sai sem src de verdade e com data-imgpath — hydrateImages() troca
+  // pela URL assinada depois que o DOM entra na tela. URLs antigas do
+  // Cloudinary (ou vazio) continuam indo direto no src, sem hidratação.
+  var isFp = ImageGateway.isFilePath(src);
+  var imgAttrs = isFp
+    ? 'data-imgpath="'+esc(src)+'" src=""'
+    : 'src="'+esc(src)+'"';
   var html = '<div class="'+wrapClass+'" style="'+themeVar+'position:relative;width:'+size+'px;height:'+size+'px;flex-shrink:0;overflow:visible;">'+
-    '<img src="'+esc(src)+'" alt="" class="avatar '+ringClass+'" style="width:'+size+'px;height:'+size+'px;">';
+    '<img '+imgAttrs+' alt="" class="avatar '+ringClass+'" style="width:'+size+'px;height:'+size+'px;">';
   // 🟢 REMOVIDO: pontinho verde de "online" sobre o avatar. A pedido do
   // Igor, o status online agora aparece como texto "Online" (na cor do
   // antigo pontinho) perto das outras infos do contato, em vez de um
@@ -4702,6 +4710,7 @@ var SUPABASE_FUNCTION_URL = SUPABASE_URL + "/functions/v1/fs-gateway";
 // Firebase), mas conversa com o Backblaze em vez do Postgres. A chave do
 // Backblaze nunca aparece aqui no cliente, fica só como secret no servidor.
 var AUDIO_FUNCTION_URL = SUPABASE_URL + "/functions/v1/audio-gateway";
+var IMAGE_FUNCTION_URL = SUPABASE_URL + "/functions/v1/image-gateway";
 
 var AudioGateway = (function () {
   "use strict";
@@ -4778,6 +4787,137 @@ var AudioGateway = (function () {
     }
   };
 })();
+
+// Ponte com o ImageKit (image-gateway), mesmo padrão do AudioGateway
+// acima. Toda imagem do app (avatar, capa de perfil, posts, anúncios,
+// foto de chat, capa de e-book) passa por aqui. Arquivos são privados
+// no ImageKit — o que fica salvo é um "filePath" (ex.:
+// "users/{uid}/profile/xxx.jpg" ou "convos/{convoId}/xxx.jpg"), nunca
+// uma URL pronta. A URL de exibição é assinada sob demanda (getUrl) e
+// cacheada aqui no cliente até perto de expirar.
+var ImageGateway = (function () {
+  "use strict";
+
+  function headers() {
+    var h = { "apikey": SUPABASE_ANON_KEY, "Content-Type": "application/json" };
+    if (_idToken) h["Authorization"] = "Bearer " + _idToken;
+    return h;
+  }
+
+  function handle(res) {
+    return res.json().then(function (body) {
+      if (!res.ok) {
+        var err = new Error((body && (body.error + (body.detail ? ": " + body.detail : ""))) || ("image-gateway HTTP " + res.status));
+        err.status = res.status;
+        throw err;
+      }
+      return body;
+    });
+  }
+
+  function call(payload) {
+    function attempt() {
+      return fetchWithTimeout(IMAGE_FUNCTION_URL, {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify(payload)
+      }, 20000);
+    }
+    return attempt().then(function (r) {
+      if (r.status === 401 && _refreshToken) {
+        return refreshIdToken().then(attempt).catch(function () { return r; });
+      }
+      return r;
+    }).then(handle);
+  }
+
+  function blobToBase64(blob) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onloadend = function () {
+        var result = reader.result || "";
+        var idx = result.indexOf(",");
+        resolve(idx === -1 ? result : result.slice(idx + 1));
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  // Cache de URLs assinadas em memória — evita bater no gateway toda
+  // vez que a mesma imagem é renderizada de novo (ex.: scroll do feed).
+  // Guarda por 5 min a menos que o prazo real, pra nunca servir uma URL
+  // vencida por causa do cache.
+  var _urlCache = {}; // filePath -> { url, expiresAt }
+  var _inflight = {}; // filePath -> Promise (evita pedidos duplicados em paralelo)
+
+  return {
+    // scope: "profile" | "post" | "ebook" | "chat". Se scope === "chat",
+    // opts.convoId é obrigatório.
+    upload: function (blob, scope, opts) {
+      opts = opts || {};
+      return blobToBase64(blob).then(function (b64) {
+        return call({
+          op: "upload",
+          scope: scope,
+          convoId: opts.convoId,
+          fileName: opts.fileName || "image.jpg",
+          contentType: blob.type || "image/jpeg",
+          dataBase64: b64
+        });
+      }).then(function (d) { return d.filePath; });
+    },
+    getUrl: function (filePath, expireSeconds) {
+      var now = Math.floor(Date.now() / 1000);
+      var cached = _urlCache[filePath];
+      if (cached && cached.expiresAt - 300 > now) return Promise.resolve(cached.url);
+      if (_inflight[filePath]) return _inflight[filePath];
+      var p = call({ op: "getUrl", filePath: filePath, expireSeconds: expireSeconds }).then(function (d) {
+        _urlCache[filePath] = { url: d.url, expiresAt: d.expiresAt };
+        delete _inflight[filePath];
+        return d.url;
+      }).catch(function (e) { delete _inflight[filePath]; throw e; });
+      _inflight[filePath] = p;
+      return p;
+    },
+    // Reconhece se uma string é um filePath do ImageKit (formato novo)
+    // em vez de uma URL do Cloudinary já pronta (formato antigo/legado
+    // — continua funcionando pra imagens antigas já publicadas).
+    isFilePath: function (src) {
+      return typeof src === "string" && (src.indexOf("users/") === 0 || src.indexOf("convos/") === 0);
+    }
+  };
+})();
+
+// Sobe uma hidratação para todo <img data-imgpath="..."> e todo
+// elemento data-bgpath="..." (background-image) que ainda não foi
+// resolvido nesta passada — troca o filePath do ImageKit por uma URL
+// assinada de verdade. Chamado no fim de render() e depois de qualquer
+// backgroundRender() que possa ter introduzido imagens novas na tela.
+function hydrateImages(root) {
+  root = root || appEl;
+  if (!root) return;
+  var imgs = root.querySelectorAll('img[data-imgpath]:not([data-hydrated])');
+  for (var i = 0; i < imgs.length; i++) {
+    (function (el) {
+      var filePath = el.getAttribute('data-imgpath');
+      el.setAttribute('data-hydrated', '1');
+      ImageGateway.getUrl(filePath).then(function (url) {
+        el.src = url;
+      }).catch(function () { /* mantém o placeholder se falhar */ });
+    })(imgs[i]);
+  }
+  var bgs = root.querySelectorAll('[data-bgpath]:not([data-hydrated])');
+  for (var j = 0; j < bgs.length; j++) {
+    (function (el) {
+      var filePath = el.getAttribute('data-bgpath');
+      el.setAttribute('data-hydrated', '1');
+      ImageGateway.getUrl(filePath).then(function (url) {
+        el.style.backgroundImage = 'url("' + url + '")';
+      }).catch(function () { /* mantém sem imagem de fundo se falhar */ });
+    })(bgs[j]);
+  }
+}
 
 var SupabaseDB = (function () {
   "use strict";
@@ -8967,6 +9107,8 @@ function _renderImpl() {
 
   _restoreFocusedField(_focusedFieldInfo);
   _restorePlayingTrack(_playingTrackInfo);
+
+  hydrateImages();
 }
 
 function openProfile(userId) {
@@ -12354,7 +12496,11 @@ function renderChatBubbleContent(m) {
       '</div>' +
     '</div>';
   }
-  if (m.type === "image") return '<img class="bubble-img" src="'+esc(m.src)+'" alt="">';
+  if (m.type === "image") {
+    return ImageGateway.isFilePath(m.src)
+      ? '<img class="bubble-img" data-imgpath="'+esc(m.src)+'" src="" alt="">'
+      : '<img class="bubble-img" src="'+esc(m.src)+'" alt="">';
+  }
   if (m.type === "video") return '<video class="bubble-video" src="'+esc(m.src)+'" controls playsinline></video>';
   if (m.type === "sticker") {
     return looksLikeImageSrc(m.src)
@@ -12420,6 +12566,16 @@ function msgStatusFor(m, conv) {
 // (patchChatMessagesInPlace) sem duplicar a lógica de montagem do HTML em
 // dois lugares — qualquer mudança futura no visual de um card de mensagem
 // só precisa ser feita aqui.
+// Monta o <div class="msg-avatar"> de uma bolha de chat, reconhecendo
+// se `avatarSrc` é um filePath do ImageKit (novo) ou uma URL pronta
+// (Cloudinary/dicebear/legado). Usado tanto no render normal quanto
+// nos renders otimistas (envio local antes da confirmação do servidor).
+function msgAvatarDivHtml(avatarSrc) {
+  return ImageGateway.isFilePath(avatarSrc)
+    ? '<div class="msg-avatar" data-bgpath="'+esc(avatarSrc)+'"></div>'
+    : '<div class="msg-avatar" style="background-image:url(\''+esc(avatarSrc)+'\');"></div>';
+}
+
 function renderChatMsgCardHtml(m, conv) {
   var isMedia = m.type !== "text";
   var user = m.me ? ME_obj() : USERS[conv.userId] || { name: "Usuário", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed="+conv.userId };
@@ -12428,7 +12584,7 @@ function renderChatMsgCardHtml(m, conv) {
   var html = '<div class="msg-card '+(m.me?"sent":"")+'" data-msg-id="'+esc(m.id)+'" data-msg-element>' +
     '<span class="msg-reply-icon">↩</span>' +
     '<div class="msg-card-swipe" data-msg-swipe>' +
-    '<div class="msg-avatar" style="background-image:url(\''+esc(avatarSrc)+'\');"></div>' +
+    msgAvatarDivHtml(avatarSrc) +
     '<div class="msg-wrapper">' +
       '<div class="msg-content">';
 
@@ -12705,8 +12861,13 @@ function bindMsgsPage() {
       _flushPendingBackgroundRender();
 
       if (kind === "image") {
-        cloudinaryWidget.uploadImageForChat(function(url) {
-          sendChatMediaViaCloudinary(url, "image");
+        cloudinaryWidget.pickLocalFile("image", function(file) {
+          var convoId = state.activeConvoId;
+          ImageGateway.upload(file, "chat", { convoId: convoId, fileName: file.name }).then(function(filePath) {
+            sendChatMediaViaCloudinary(filePath, "image");
+          }).catch(function() {
+            showToast("Erro ao enviar a foto. Tente novamente.");
+          });
         });
       } else if (kind === "video") {
         cloudinaryWidget.uploadVideoForChat(function(url) {
@@ -12743,12 +12904,13 @@ function bindMsgsPage() {
     });
   });
 
-  // ✅ NOVO: Função para enviar foto/vídeo via Cloudinary
-  function sendChatMediaViaCloudinary(cloudinaryUrl, mediaType) {
+  // Envia foto (ImageGateway/ImageKit, `src` é um filePath privado) ou
+  // vídeo (continua no Cloudinary, `src` é uma URL pronta).
+  function sendChatMediaViaCloudinary(src, mediaType) {
     var msgId = uid();
     var createdAt = new Date().toISOString();
     var chat = _chatRaw(state.activeConvoId);
-    var msgObj = { id:msgId, _firestoreId:msgId, me:true, type:mediaType, src:cloudinaryUrl, createdAt:createdAt, time:_relTime(createdAt) };
+    var msgObj = { id:msgId, _firestoreId:msgId, me:true, type:mediaType, src:src, createdAt:createdAt, time:_relTime(createdAt) };
     chat.push(msgObj);
     
     var conv = CONVOS.find(function(c){ return c.id === state.activeConvoId; });
@@ -12759,22 +12921,25 @@ function bindMsgsPage() {
     if (chatBox) {
       var me = ME_obj();
       var avatarSrc = me.avatar || "https://api.dicebear.com/7.x/avataaars/svg?seed="+ME_ID;
+      var avatarIsFp = ImageGateway.isFilePath(avatarSrc);
+      var avatarDivAttrs = avatarIsFp ? 'data-bgpath="'+esc(avatarSrc)+'"' : 'style="background-image:url(\''+esc(avatarSrc)+'\');"';
       var msgCard = document.createElement("div");
       msgCard.className = "msg-card sent";
       msgCard.setAttribute("data-msg-id", msgId);
       msgCard.setAttribute("data-msg-element", "");
       
       if (mediaType === "image") {
-        msgCard.innerHTML = '<div class="msg-avatar" style="background-image:url(\''+esc(avatarSrc)+'\');"></div>' +
-          '<div class="msg-wrapper"><div class="msg-content"><img class="bubble-img" src="' + esc(cloudinaryUrl) + '" alt=""></div>' +
+        msgCard.innerHTML = '<div class="msg-avatar" '+avatarDivAttrs+'></div>' +
+          '<div class="msg-wrapper"><div class="msg-content"><img class="bubble-img" data-imgpath="' + esc(src) + '" src="" alt=""></div>' +
           '<div class="msg-time">'+_relTime(createdAt)+'</div></div>';
       } else if (mediaType === "video") {
-        msgCard.innerHTML = '<div class="msg-avatar" style="background-image:url(\''+esc(avatarSrc)+'\');"></div>' +
-          '<div class="msg-wrapper"><div class="msg-content"><video class="bubble-video" src="' + esc(cloudinaryUrl) + '" controls playsinline></video></div>' +
+        msgCard.innerHTML = '<div class="msg-avatar" '+avatarDivAttrs+'></div>' +
+          '<div class="msg-wrapper"><div class="msg-content"><video class="bubble-video" src="' + esc(src) + '" controls playsinline></video></div>' +
           '<div class="msg-time">'+_relTime(createdAt)+'</div></div>';
       }
       
       chatBox.appendChild(msgCard);
+      hydrateImages(msgCard);
     }
     
     scrollChatToBottom();
@@ -12834,10 +12999,11 @@ function bindMsgsPage() {
       msgCard.className = "msg-card sent";
       msgCard.setAttribute("data-msg-id", msgId);
       msgCard.setAttribute("data-msg-element", "");
-      msgCard.innerHTML = '<div class="msg-avatar" style="background-image:url(\''+esc(avatarSrc)+'\');"></div>' +
+      msgCard.innerHTML = msgAvatarDivHtml(avatarSrc) +
         '<div class="msg-wrapper"><div class="msg-content">' + renderChatBubbleContent(msgObj) + '</div>' +
         '<div class="msg-time">'+msgObj.time+'</div></div>';
       chatBox.appendChild(msgCard);
+      hydrateImages(msgCard);
     }
 
     scrollChatToBottom();
@@ -13029,13 +13195,14 @@ function bindMsgsPage() {
       msgCard.className = "msg-card sent";
       msgCard.setAttribute("data-msg-id", msgId);
       msgCard.setAttribute("data-msg-element", "");
-      msgCard.innerHTML = '<div class="msg-avatar" style="background-image:url(\''+esc(avatarSrc)+'\');"></div>' +
+      msgCard.innerHTML = msgAvatarDivHtml(avatarSrc) +
         '<div class="msg-wrapper"><div class="msg-content">' +
         (kind === "image" 
           ? '<img class="bubble-img" src="'+esc(dataUrl)+'">'
           : '<video class="bubble-video" src="'+esc(dataUrl)+'" controls playsinline></video>') +
         '</div><div class="msg-time">'+msgObj.time+'</div></div>';
       chatBox.appendChild(msgCard);
+      hydrateImages(msgCard);
     }
     
     scrollChatToBottom();
@@ -13411,12 +13578,13 @@ function sendChatMessage() {
     msgCard.setAttribute("data-msg-element", "");
     msgCard.innerHTML = '<span class="msg-reply-icon">↩</span>' +
       '<div class="msg-card-swipe" data-msg-swipe>' +
-      '<div class="msg-avatar" style="background-image:url(\''+esc(avatarSrc)+'\');"></div>' +
+      msgAvatarDivHtml(avatarSrc) +
       '<div class="msg-wrapper"><div class="msg-content">' + (replyTo ? renderQuoteHtml(replyTo) : '') + esc(text) +
       '<div data-msg-translate="'+esc(localId)+'"></div>' +
       '</div><div class="msg-time">' + msgObj.time + renderMsgStatusIcon("sending") + '</div></div>' +
       '</div>';
     chatBox.appendChild(msgCard);
+    hydrateImages(msgCard);
     ensureMessageTranslation(msgObj);
   }
   
@@ -13528,11 +13696,12 @@ function sendLoveLetter(text) {
     msgCard.setAttribute("data-msg-id", msgId);
     msgCard.setAttribute("data-msg-element", "");
     msgCard.innerHTML = '<div class="msg-card-swipe" data-msg-swipe>' +
-      '<div class="msg-avatar" style="background-image:url(\''+esc(avatarSrc)+'\');"></div>' +
+      msgAvatarDivHtml(avatarSrc) +
       '<div class="msg-wrapper"><div class="msg-content">' + renderChatBubbleContent(msgObj) +
       '</div><div class="msg-time">' + msgObj.time + renderMsgStatusIcon("sending") + '</div></div>' +
       '</div>';
     chatBox.appendChild(msgCard);
+    hydrateImages(msgCard);
     msgCard.querySelectorAll("[data-open-letter]").forEach(function(el) {
       el.addEventListener("click", function() { openLoveLetterView(el.getAttribute("data-open-letter")); });
     });
@@ -13747,11 +13916,12 @@ function sendMazeInvite() {
     msgCard.setAttribute("data-msg-id", msgId);
     msgCard.setAttribute("data-msg-element", "");
     msgCard.innerHTML = '<div class="msg-card-swipe" data-msg-swipe>' +
-      '<div class="msg-avatar" style="background-image:url(\''+esc(avatarSrc)+'\');"></div>' +
+      msgAvatarDivHtml(avatarSrc) +
       '<div class="msg-wrapper"><div class="msg-content">' + renderChatBubbleContent(msgObj) +
       '</div><div class="msg-time">' + msgObj.time + renderMsgStatusIcon("sending") + '</div></div>' +
       '</div>';
     chatBox.appendChild(msgCard);
+    hydrateImages(msgCard);
     msgCard.querySelectorAll("[data-open-maze]").forEach(function(el) {
       el.addEventListener("click", function() { openMazeGameFromMsg(el.getAttribute("data-open-maze")); });
     });
@@ -14283,11 +14453,12 @@ function sendTicTacInvite() {
     msgCard.setAttribute("data-msg-id", msgId);
     msgCard.setAttribute("data-msg-element", "");
     msgCard.innerHTML = '<div class="msg-card-swipe" data-msg-swipe>' +
-      '<div class="msg-avatar" style="background-image:url(\''+esc(avatarSrc)+'\');"></div>' +
+      msgAvatarDivHtml(avatarSrc) +
       '<div class="msg-wrapper"><div class="msg-content">' + renderChatBubbleContent(msgObj) +
       '</div><div class="msg-time">' + msgObj.time + renderMsgStatusIcon("sending") + '</div></div>' +
       '</div>';
     chatBox.appendChild(msgCard);
+    hydrateImages(msgCard);
     msgCard.querySelectorAll("[data-open-tictac]").forEach(function(el) {
       el.addEventListener("click", function() { openTicTacGameFromMsg(el.getAttribute("data-open-tictac")); });
     });
@@ -15901,7 +16072,9 @@ function renderProfilePage(userId) {
   if (!tabs.indexOf || tabs.indexOf(profileTab) === -1) profileTab = "posts";
 
   var isCoverVideo = !!(u.cover && u.coverType === "video");
-  var coverStyle = (u.cover && !isCoverVideo) ? 'background-image:url('+u.cover+');background-size:cover;background-position:center;' : '';
+  var coverIsFp = !!(u.cover && !isCoverVideo && ImageGateway.isFilePath(u.cover));
+  var coverStyle = (u.cover && !isCoverVideo && !coverIsFp) ? 'background-image:url('+u.cover+');background-size:cover;background-position:center;' : '';
+  var coverBgPathAttr = coverIsFp ? ' data-bgpath="'+esc(u.cover)+'"' : '';
   var coverVideoHtml = isCoverVideo ? '<video src="'+u.cover+'" autoplay muted loop playsinline style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;"></video>' : '';
   var backBtn = !isMe ? '<button class="icon-btn" data-back-profile style="position:absolute;top:12px;left:12px;background:rgba(255,255,255,.35);border-radius:50%;color:#fff;z-index:2;">'+icoSvg("back",20,"#fff")+'</button>' : "";
   var coverBtn = '<button class="icon-btn" data-open-profile-sheet="'+userId+'" style="position:absolute;top:12px;right:12px;background:rgba(255,255,255,.35);border-radius:50%;color:#fff;z-index:2;">'+icoSvg("more",20,"#fff")+'</button>';
@@ -15923,7 +16096,7 @@ function renderProfilePage(userId) {
   var showGlow = isPlus && ringThemeKey !== "none";
   var ringColors = getRingThemeColors(u);
   var plusDividerHtml = showGlow ? '<div class="profile-plus-divider'+(ringThemeKey==="fire"?" theme-fire":"")+'" style="--ring-colors:'+ringColors+';"></div>' : "";
-  var html = '<div class="profile-cover" style="'+coverStyle+'">'+coverVideoHtml+backBtn+coverBtn+'</div>' +
+  var html = '<div class="profile-cover"'+coverBgPathAttr+' style="'+coverStyle+'">'+coverVideoHtml+backBtn+coverBtn+'</div>' +
     plusDividerHtml +
     '<div class="profile-info">' +
       '<div class="profile-header-wrap">' +
@@ -16164,8 +16337,12 @@ function bookStatusIcon(status) {
 }
 function bookCoverHtml(book, extraAttr) {
   if (book.coverUrl) {
+    var isFp = ImageGateway.isFilePath(book.coverUrl);
+    var imgAttrs = isFp
+      ? 'data-imgpath="'+esc(book.coverUrl)+'" src=""'
+      : 'src="'+book.coverUrl+'"';
     return '<div class="book-cover" style="padding:0;background:#222;" '+(extraAttr||"")+'>' +
-      '<img src="'+book.coverUrl+'" alt="" style="width:100%;height:100%;object-fit:cover;display:block;">' +
+      '<img '+imgAttrs+' alt="" style="width:100%;height:100%;object-fit:cover;display:block;">' +
     '</div>';
   }
   if (book.isUpload) {
@@ -16329,8 +16506,10 @@ function finishEbookDraft(file, title, author, coverBlob) {
   };
   render();
   if (coverBlob) {
-    cloudinaryWidget.uploadDirectFile(coverBlob, "image", function(url) {
-      if (state.bookAddDraft && !state.bookAddDraft.editing) { state.bookAddDraft.coverUrl = url; render(); }
+    ImageGateway.upload(coverBlob, "ebook", { fileName: "cover.jpg" }).then(function(filePath) {
+      if (state.bookAddDraft && !state.bookAddDraft.editing) { state.bookAddDraft.coverUrl = filePath; render(); }
+    }).catch(function() {
+      showToast("Erro ao enviar a capa do livro. Tente novamente.");
     });
   }
   uploadEbookFile(file, function(url) {
@@ -17029,7 +17208,7 @@ function renderEditProfile() {
       '<button class="btn btn-sm btn-primary" data-save-edit>Salvar</button>' +
     '</div>' +
     '<div class="edit-body">' +
-      '<div class="edit-cover-preview" style="'+((u.cover && u.coverType!=="video")?'background-image:url('+u.cover+');background-size:cover;background-position:center;':'')+'">' +
+      '<div class="edit-cover-preview"'+((u.cover && u.coverType!=="video" && ImageGateway.isFilePath(u.cover))?' data-bgpath="'+esc(u.cover)+'"':'')+' style="'+((u.cover && u.coverType!=="video" && !ImageGateway.isFilePath(u.cover))?'background-image:url('+u.cover+');background-size:cover;background-position:center;':'')+'">' +
         ((u.cover && u.coverType==="video") ? '<video src="'+u.cover+'" autoplay muted loop playsinline style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;"></video>' : "") +
         '<div class="edit-cover-btn" style="opacity:.85;" data-edit-cover-2>'+icoSvg("edit",16,"#fff")+' Trocar capa</div>' +
       '</div>' +
@@ -17060,20 +17239,31 @@ function bindEditProfile() {
   if (avatarInput) avatarInput.addEventListener("change", function() {
     var file = avatarInput.files[0]; if (!file) return;
     showToast("⏳ Enviando foto...");
-    cloudinaryWidget.uploadDirectFile(file, "image", function(url) {
+    ImageGateway.upload(file, "profile", { fileName: file.name }).then(function(filePath) {
       // Salva na hora (não espera o botão "Salvar" geral) — antes, a troca de
       // foto aqui dentro do modal só ficava em memória até clicar em "Salvar",
       // e se a pessoa fechasse a tela sem notar o botão, a mudança se perdia.
-      persistAvatarChange(url);
+      persistAvatarChange(filePath);
+    }).catch(function() {
+      showToast("Erro ao enviar a foto. Tente novamente.");
     });
   });
   if (coverInput) coverInput.addEventListener("change", function() {
     var file = coverInput.files[0]; if (!file) return;
     var isVideo = file.type.indexOf("video/") === 0;
     showToast("⏳ Enviando capa...");
-    cloudinaryWidget.uploadDirectFile(file, isVideo ? "video" : "image", function(url) {
-      persistCoverChange(url, isVideo ? "video" : "image");
-    });
+    if (isVideo) {
+      // Vídeo continua no Cloudinary — só a imagem migrou pro ImageKit.
+      cloudinaryWidget.uploadDirectFile(file, "video", function(url) {
+        persistCoverChange(url, "video");
+      });
+    } else {
+      ImageGateway.upload(file, "profile", { fileName: file.name }).then(function(filePath) {
+        persistCoverChange(filePath, "image");
+      }).catch(function() {
+        showToast("Erro ao enviar a capa. Tente novamente.");
+      });
+    }
   });
 
   // FIX: Rastrear quando bio está sendo editado para não triggar render
@@ -17731,7 +17921,10 @@ function renderCreatePost() {
         '</div>' +
         renderAudioTrimEditor();
     } else {
-      mediaPreview = '<div class="create-preview-wrap"><img src="'+compose.media+'" alt="">' +
+      var composeImgAttrs = ImageGateway.isFilePath(compose.media)
+        ? 'data-imgpath="'+esc(compose.media)+'" src=""'
+        : 'src="'+compose.media+'"';
+      mediaPreview = '<div class="create-preview-wrap"><img '+composeImgAttrs+' alt="">' +
         '<button class="create-remove-media" data-remove-media>'+icoSvg("close",16,"#fff")+'</button></div>';
     }
   }
@@ -20010,13 +20203,32 @@ var cloudinaryWidget = {
     fileInput.click();
   },
 
+  // Igual ao showFilePicker acima, mas NÃO sobe pro Cloudinary — só
+  // devolve o File escolhido cru. Usado pelos fluxos que migraram pro
+  // ImageGateway (ImageKit), que fazem o upload deles mesmos.
+  pickLocalFile: function(mediaType, callback) {
+    var fileInput = document.createElement("input");
+    fileInput.type = "file";
+    fileInput.accept = mediaType === "video"
+      ? "video/mp4,video/quicktime,video/x-msvideo,video/webm"
+      : "image/jpeg,image/png,image/gif,image/webp";
+    fileInput.onchange = function(e) {
+      var file = e.target.files[0];
+      if (file) callback(file);
+    };
+    fileInput.click();
+  },
+
   uploadImage: function() {
-    var self = this;
-    this.initWidget("image", function(url) {
-      compose.media = url;
-      compose.mediaType = "image";
-      showToast(toastWithIcon("Foto selecionada", "photo", "before"), true);
-      render();
+    this.pickLocalFile("image", function(file) {
+      ImageGateway.upload(file, "post", { fileName: file.name }).then(function(filePath) {
+        compose.media = filePath;
+        compose.mediaType = "image";
+        showToast(toastWithIcon("Foto selecionada", "photo", "before"), true);
+        render();
+      }).catch(function() {
+        showToast("Erro ao enviar a foto. Tente novamente.");
+      });
     });
   },
 
