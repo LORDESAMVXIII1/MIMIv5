@@ -4795,6 +4795,11 @@ var AudioGateway = (function () {
 // "users/{uid}/profile/xxx.jpg" ou "convos/{convoId}/xxx.jpg"), nunca
 // uma URL pronta. A URL de exibição é assinada sob demanda (getUrl) e
 // cacheada aqui no cliente até perto de expirar.
+// Trava simples pra evitar dois uploads de imagem em paralelo (ex.:
+// toque duplo sem querer no celular). Só uma pessoa por vez, só uma
+// imagem por vez — não precisa ser por tipo.
+var _imgUploadBusy = false;
+
 var ImageGateway = (function () {
   "use strict";
 
@@ -12861,13 +12866,15 @@ function bindMsgsPage() {
       _flushPendingBackgroundRender();
 
       if (kind === "image") {
+        if (_imgUploadBusy) return;
         cloudinaryWidget.pickLocalFile("image", function(file) {
+          _imgUploadBusy = true;
           var convoId = state.activeConvoId;
           ImageGateway.upload(file, "chat", { convoId: convoId, fileName: file.name }).then(function(filePath) {
             sendChatMediaViaCloudinary(filePath, "image");
-          }).catch(function() {
-            showToast("Erro ao enviar a foto. Tente novamente.");
-          });
+          }).catch(function(err) {
+            showToast("Erro ao enviar a foto: " + (err && err.message ? err.message : "tente novamente."));
+          }).then(function() { _imgUploadBusy = false; });
         });
       } else if (kind === "video") {
         cloudinaryWidget.uploadVideoForChat(function(url) {
@@ -16101,7 +16108,7 @@ function renderProfilePage(userId) {
     '<div class="profile-info">' +
       '<div class="profile-header-wrap">' +
         '<div class="profile-top-row">' +
-          '<div class="profile-avatar-wrap" data-view-avatar="'+esc(u.avatar||"")+'" style="cursor:pointer;">'+avatarHtml(u.avatar,72,false,false,showGlow,ringColors,ringThemeKey,getUserFrame(u))+
+          '<div class="profile-avatar-wrap" data-view-avatar="'+esc(u.avatar||"")+'" style="cursor:pointer;">'+avatarHtml(u.avatar||"https://api.dicebear.com/7.x/avataaars/svg?seed="+u.uid,72,false,false,showGlow,ringColors,ringThemeKey,getUserFrame(u))+
           '</div>' +
           '<div class="profile-actions">' + actionBtns + '</div>' +
         '</div>' +
@@ -16508,8 +16515,8 @@ function finishEbookDraft(file, title, author, coverBlob) {
   if (coverBlob) {
     ImageGateway.upload(coverBlob, "ebook", { fileName: "cover.jpg" }).then(function(filePath) {
       if (state.bookAddDraft && !state.bookAddDraft.editing) { state.bookAddDraft.coverUrl = filePath; render(); }
-    }).catch(function() {
-      showToast("Erro ao enviar a capa do livro. Tente novamente.");
+    }).catch(function(err) {
+      showToast("Erro ao enviar a capa do livro: " + (err && err.message ? err.message : "tente novamente."));
     });
   }
   uploadEbookFile(file, function(url) {
@@ -17213,7 +17220,7 @@ function renderEditProfile() {
         '<div class="edit-cover-btn" style="opacity:.85;" data-edit-cover-2>'+icoSvg("edit",16,"#fff")+' Trocar capa</div>' +
       '</div>' +
       '<div class="edit-avatar-wrap">' +
-        '<div style="position:relative;">'+avatarHtml(u.avatar,84,false,false,false,null,null,getUserFrame(u)) +
+        '<div style="position:relative;">'+avatarHtml(u.avatar||"https://api.dicebear.com/7.x/avataaars/svg?seed="+u.uid,84,false,false,false,null,null,getUserFrame(u)) +
         '<button class="edit-avatar-cam" data-edit-avatar-2>'+icoSvg("edit",14,"#fff")+'</button></div>' +
       '</div>' +
       '<div class="edit-field"><label class="edit-field-label">Nome</label><input class="input" data-edit-field="name" value="'+esc(u.name)+'"></div>' +
@@ -17238,15 +17245,17 @@ function bindEditProfile() {
   if (coverBtn) coverBtn.addEventListener("click", function() { if (coverInput) coverInput.click(); });
   if (avatarInput) avatarInput.addEventListener("change", function() {
     var file = avatarInput.files[0]; if (!file) return;
+    if (_imgUploadBusy) return;
+    _imgUploadBusy = true;
     showToast("⏳ Enviando foto...");
     ImageGateway.upload(file, "profile", { fileName: file.name }).then(function(filePath) {
       // Salva na hora (não espera o botão "Salvar" geral) — antes, a troca de
       // foto aqui dentro do modal só ficava em memória até clicar em "Salvar",
       // e se a pessoa fechasse a tela sem notar o botão, a mudança se perdia.
       persistAvatarChange(filePath);
-    }).catch(function() {
-      showToast("Erro ao enviar a foto. Tente novamente.");
-    });
+    }).catch(function(err) {
+      showToast("Erro ao enviar a foto: " + (err && err.message ? err.message : "tente novamente."));
+    }).then(function() { _imgUploadBusy = false; });
   });
   if (coverInput) coverInput.addEventListener("change", function() {
     var file = coverInput.files[0]; if (!file) return;
@@ -17258,11 +17267,13 @@ function bindEditProfile() {
         persistCoverChange(url, "video");
       });
     } else {
+      if (_imgUploadBusy) return;
+      _imgUploadBusy = true;
       ImageGateway.upload(file, "profile", { fileName: file.name }).then(function(filePath) {
         persistCoverChange(filePath, "image");
-      }).catch(function() {
-        showToast("Erro ao enviar a capa. Tente novamente.");
-      });
+      }).catch(function(err) {
+        showToast("Erro ao enviar a capa: " + (err && err.message ? err.message : "tente novamente."));
+      }).then(function() { _imgUploadBusy = false; });
     }
   });
 
@@ -20220,15 +20231,17 @@ var cloudinaryWidget = {
   },
 
   uploadImage: function() {
+    if (_imgUploadBusy) return;
     this.pickLocalFile("image", function(file) {
+      _imgUploadBusy = true;
       ImageGateway.upload(file, "post", { fileName: file.name }).then(function(filePath) {
         compose.media = filePath;
         compose.mediaType = "image";
         showToast(toastWithIcon("Foto selecionada", "photo", "before"), true);
         render();
-      }).catch(function() {
-        showToast("Erro ao enviar a foto. Tente novamente.");
-      });
+      }).catch(function(err) {
+        showToast("Erro ao enviar a foto: " + (err && err.message ? err.message : "tente novamente."));
+      }).then(function() { _imgUploadBusy = false; });
     });
   },
 
