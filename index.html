@@ -2222,6 +2222,32 @@ function getUserFrame(u) {
   return (u && u.frame && PROFILE_FRAMES[u.frame]) ? u.frame : null;
 }
 
+// ⚡ PERF (molduras lentas/sumindo): as molduras são PNGs em base64
+// pesados (a "Cristal" sozinha tem 1,78 MB). Antes, cada avatar com
+// moldura colava o data-URI inteiro dentro de um <img src="..."> — e
+// como render() reconstrói a tela inteira do zero a cada atualização
+// (mensagem chegando, poll de presença/conversas, etc.), qualquer tela
+// com vários avatares "Plus" (lista de conversas, feed, tela de
+// escolher moldura com as 8 de uma vez) colava a MESMA imagem gigante
+// repetida dezenas de vezes, em TODO render — pesado o bastante pra
+// esbarrar em limites do navegador e a moldura simplesmente não
+// aparecer em algum avatar durante um render mais concorrido. Agora
+// cada moldura é registrada UMA VEZ como classe CSS (injetada só uma
+// vez no <head>, no carregamento do app); os avatares passam a
+// referenciar só a classe (poucos bytes) em vez de repetir a imagem
+// inteira. Resultado visual idêntico, muito menos HTML pra montar e
+// menos chance de a imagem falhar em algum avatar.
+(function injectFrameStyles() {
+  var css = "";
+  Object.keys(PROFILE_FRAMES).forEach(function(key) {
+    css += ".mimi-frame-bg-" + key + "{background-image:url('" + PROFILE_FRAMES[key].src + "');background-size:contain;background-position:center;background-repeat:no-repeat;}";
+  });
+  var styleEl = document.createElement("style");
+  styleEl.setAttribute("data-mimi-frame-styles", "1");
+  styleEl.textContent = css;
+  document.head.appendChild(styleEl);
+})();
+
 // 🖼️ Preview de moldura "pura" (sem avatar, fundo transparente), usado na
 // tela de "Molduras de perfil" pra mostrar só a moldura em si.
 function frameOnlyHtml(frameKey, size) {
@@ -2234,7 +2260,7 @@ function frameOnlyHtml(frameKey, size) {
   var bleed = Math.round(size * 1.35);
   return '<div style="position:relative;width:'+size+'px;height:'+size+'px;flex-shrink:0;overflow:visible;background:transparent;">' +
     '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:'+bleed+'px;height:'+bleed+'px;overflow:hidden;border-radius:50%;pointer-events:none;display:flex;align-items:center;justify-content:center;background:transparent;">' +
-      '<img src="'+frame.src+'" alt="" width="'+fsize+'" height="'+fsize+'" style="width:'+fsize+'px;height:'+fsize+'px;max-width:none;flex-shrink:0;">' +
+      '<div class="mimi-frame-bg-'+frameKey+'" style="width:'+fsize+'px;height:'+fsize+'px;flex-shrink:0;"></div>' +
     '</div>' +
   '</div>';
 }
@@ -2264,7 +2290,7 @@ function avatarHtml(src, size, online, ring, plusRing, ringColors, themeKey, fra
     var fsize = Math.round(size * frame.scale);
     var bleed = Math.round(size * 1.35); // hard cap: the frame can never visually extend past this, no matter what
     html += '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:'+bleed+'px;height:'+bleed+'px;overflow:hidden;border-radius:50%;pointer-events:none;z-index:3;display:flex;align-items:center;justify-content:center;">' +
-              '<img src="'+esc(frame.src)+'" alt="" width="'+fsize+'" height="'+fsize+'" style="width:'+fsize+'px;height:'+fsize+'px;max-width:none;flex-shrink:0;">' +
+              '<div class="mimi-frame-bg-'+frameKey+'" style="width:'+fsize+'px;height:'+fsize+'px;flex-shrink:0;"></div>' +
             '</div>';
   }
   html += '</div>';
