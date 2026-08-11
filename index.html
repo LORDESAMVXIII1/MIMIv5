@@ -20604,7 +20604,7 @@ function ensureMyAffinityLoaded() {
     _myAffinityCache = map;
     _myAffinityMaxWatch = maxWatch;
     _myAffinityLoading = false;
-    if (state.page === "feed") render();
+    if (state.page === "feed" || state.page === "vibes") render();
   }).catch(function() {
     _myAffinityCache = {}; // não trava tentando de novo pra sempre
     _myAffinityLoading = false;
@@ -20645,36 +20645,34 @@ var VibesModule = {
       return;
     }
     self._userLoaded = true;
-    self._loading = true;
+    // FIX (percepção de demora vs. Reels): a tela de "Carregando vibes…"
+    // bloqueante só faz sentido quando ainda não há nada pra mostrar. Se já
+    // existe uma lista carregada antes nesta sessão, mantém ela na tela
+    // (igual ao Reels, que nunca mostra um loading full-screen de novo) e
+    // troca em segundo plano assim que os dados novos chegarem.
+    self._loading = self.vibes.length === 0;
     if (state.page === "vibes") render();
-    // 2.4 (personalização): carrega o perfil de afinidade por autor
-    // (pequeno, 1 doc por autor já assistido) em paralelo com as vibes,
-    // pra poder aplicar o multiplicador antes de ordenar. Se a busca de
-    // afinidade falhar por qualquer motivo, segue com mapa vazio — a
-    // pessoa só perde a personalização daquele carregamento, não o
-    // ranking inteiro (fallback pro score global de sempre).
-    Promise.all([
-      FB.loadVibes(),
-      fsList("users/" + ME_ID + "/authorAffinity").catch(function(){ return []; })
-    ]).then(function(results) {
-      var vibes = results[0];
-      var affinityDocs = results[1] || [];
+    // 2.4 (personalização): antes buscava o perfil de afinidade do banco
+    // aqui mesmo, em paralelo com as vibes — uma chamada de rede inteira
+    // bloqueando a tela só pra decidir a ordem. Agora usa o mesmo cache
+    // compartilhado com o Feed (ensureMyAffinityLoaded/_myAffinityCache):
+    // dispara o carregamento em segundo plano (sem esperar) e lê o que já
+    // estiver disponível. Se ainda não chegou, entra sem personalização
+    // nessa rodada (fallback pro score global) — a tela não fica esperando.
+    ensureMyAffinityLoaded();
+    FB.loadVibes().then(function(vibes) {
       // 2.3 (sinais negativos): tira do feed o que a pessoa já disse que
       // não quer ver — vídeo marcado como "não tenho interesse"/denunciado,
       // ou de alguém que ela bloqueou.
       vibes = vibes.filter(function(v) {
         return !isVibeNotInterested(v.id) && !isUserBlocked(v.userId);
       });
-      var affinityMap = {};
-      var maxAffinityWatch = 0;
-      affinityDocs.forEach(function(a) {
-        affinityMap[a._id] = a;
-        if ((a.totalWatchSeconds || 0) > maxAffinityWatch) maxAffinityWatch = a.totalWatchSeconds;
-      });
-      // 2.7 (cold start): sem nenhum authorAffinity gravado ainda, a
-      // pessoa não tem gosto conhecido — trata como usuário novo pra
-      // fins de ranking.
-      var isColdStart = affinityDocs.length === 0;
+      var affinityMap = _myAffinityCache || {};
+      var maxAffinityWatch = _myAffinityMaxWatch || 0;
+      // 2.7 (cold start): sem nenhum authorAffinity no cache (já carregado
+      // ou ainda carregando), a pessoa não tem gosto conhecido nessa
+      // rodada — trata como usuário novo pra fins de ranking.
+      var isColdStart = Object.keys(affinityMap).length === 0;
       var maxRawEngagement = 0;
       vibes.forEach(function(v) {
         var raw = _vibeRawEngagement(v);
