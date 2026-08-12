@@ -6294,14 +6294,21 @@ var FB = {
   // cada uma com esse timestamp.
   markConvoRead: function(convoId) {
     if (!_idToken || !convoId || !ME_ID) return Promise.resolve();
+    var nowIso = new Date().toISOString();
+    var conv = CONVOS.find(function(c){ return c.id === convoId; });
+    if (conv) { conv.myLastRead = nowIso; conv.unread = 0; }
     var field = {};
-    var _nowIso = new Date().toISOString();
-    field["lastRead_" + ME_ID] = _nowIso;
-    // 🩹 FIX (badge "Responder"): guarda localmente ATÉ QUANDO eu já vi
-    // essa conversa. É esse carimbo que decide se a badge pode aparecer
-    // (só depois de eu ter visto a mensagem da outra pessoa).
-    var _cv = CONVOS.find(function(c){ return c.id === convoId; });
-    if (_cv) _cv.myLastRead = _nowIso;
+    field["lastRead_" + ME_ID] = nowIso;
+    return fsSet("convos/" + convoId, field, true).catch(function(){});
+  },
+
+  // Depois que o aviso já apareceu, abrir a conversa novamente o dispensa
+  // para esta mensagem. Uma nova mensagem terá outro lastTime e poderá gerar
+  // um novo aviso normalmente.
+  dismissReplyPrompt: function(convoId, lastTime) {
+    if (!_idToken || !convoId || !ME_ID || !lastTime) return Promise.resolve();
+    var field = {};
+    field["replyDismissed_" + ME_ID] = lastTime;
     return fsSet("convos/" + convoId, field, true).catch(function(){});
   },
 
@@ -6368,10 +6375,11 @@ var FB = {
           existingConv.lastSenderId = doc.lastSenderId || null;
           existingConv._lastTimeRaw = doc.lastTime || existingConv._lastTimeRaw;
           existingConv.unread = (isFromOther && !alreadyRead) ? 1 : 0;
-          if (myLastRead && (!existingConv.myLastRead || myLastRead > existingConv.myLastRead)) existingConv.myLastRead = myLastRead;
           existingConv.pinned = doc.pinned || false;
           existingConv.archived = doc.archived || false;
           existingConv.otherLastRead = doc["lastRead_" + otherId] || existingConv.otherLastRead;
+          existingConv.myLastRead = myLastRead || existingConv.myLastRead || null;
+          existingConv.replyPromptDismissedFor = doc["replyDismissed_" + myId] || existingConv.replyPromptDismissedFor || null;
           existingConv.theme = doc.theme || existingConv.theme;
           if (!doc.lastMsg || !doc.lastSenderId) FB._repairConvoPreview(doc._id, otherId, myId);
           return;
@@ -6382,12 +6390,13 @@ var FB = {
           unread: (isFromOther && !alreadyRead) ? 1 : 0, online: false,
           pinned: doc.pinned || false, archived: doc.archived || false,
           otherLastRead: doc["lastRead_" + otherId] || null,
+          myLastRead: myLastRead,
+          replyPromptDismissedFor: doc["replyDismissed_" + myId] || null,
           theme: doc.theme || null,
           activeMazeRoomId: doc.activeMazeRoomId || null,
           activeTicTacRoomId: doc.activeTicTacRoomId || null,
           _lastTimeRaw: doc.lastTime || null,
           lastSenderId: doc.lastSenderId || null,
-          myLastRead: myLastRead || null,
         });
         if (!USERS[otherId]) {
           fsGet("users/"+otherId).then(function(u) {
@@ -7325,12 +7334,13 @@ function _applyConvoDoc(doc, myId) {
       unread: (isFromOther0 && !alreadyRead0) ? 1 : 0, online: false,
       pinned: doc.pinned || false, archived: doc.archived || false,
       otherLastRead: doc["lastRead_" + otherId] || null,
+      myLastRead: myLastRead0,
+      replyPromptDismissedFor: doc["replyDismissed_" + myId] || null,
       theme: doc.theme || null,
       activeMazeRoomId: doc.activeMazeRoomId || null,
       activeTicTacRoomId: doc.activeTicTacRoomId || null,
       _lastTimeRaw: doc.lastTime || null,
       lastSenderId: doc.lastSenderId || null,
-      myLastRead: myLastRead0 || null,
     };
     CONVOS.unshift(conv);
     changed = true;
@@ -7353,7 +7363,6 @@ function _applyConvoDoc(doc, myId) {
     var isFromOther = doc.lastSenderId && doc.lastSenderId !== myId && doc.lastSenderId !== _fbUid;
     var myLastRead = doc["lastRead_" + myId] || null;
     var alreadyRead = myLastRead && myLastRead >= doc.lastTime;
-    if (myLastRead && (!conv.myLastRead || myLastRead > conv.myLastRead)) conv.myLastRead = myLastRead;
     // Não marca como não-lida se essa conversa está aberta na tela
     // agora mesmo (o polling do chat já cuida de marcar como vista).
     if (isFromOther && !alreadyRead && state.activeConvoId !== conv.id) {
@@ -7367,6 +7376,16 @@ function _applyConvoDoc(doc, myId) {
   var newOtherRead = doc["lastRead_" + otherId] || null;
   if (newOtherRead !== conv.otherLastRead) {
     conv.otherLastRead = newOtherRead;
+    changed = true;
+  }
+  var newMyRead = doc["lastRead_" + myId] || null;
+  if (newMyRead && newMyRead !== conv.myLastRead) {
+    conv.myLastRead = newMyRead;
+    changed = true;
+  }
+  var newReplyDismissed = doc["replyDismissed_" + myId] || null;
+  if (newReplyDismissed !== (conv.replyPromptDismissedFor || null)) {
+    conv.replyPromptDismissedFor = newReplyDismissed;
     changed = true;
   }
 
@@ -12521,23 +12540,17 @@ function renderConvoLastPreview(text) {
   return '<span style="display:inline-flex;align-items:center;gap:4px;vertical-align:middle;">'+icoSvg(m[0],13,"var(--muted)")+esc(m[1])+'</span>';
 }
 
+function shouldShowReplyPrompt(c) {
+  if (!c || !c.lastSenderId || !c._lastTimeRaw) return false;
+  var lastIsMine = c.lastSenderId === ME_ID || c.lastSenderId === _fbUid;
+  var sawLast = !!(c.myLastRead && c.myLastRead >= c._lastTimeRaw);
+  var dismissed = c.replyPromptDismissedFor === c._lastTimeRaw;
+  return !lastIsMine && sawLast && !dismissed && state.activeConvoId !== c.id;
+}
+
 function renderConvoRow(c, insideCard) {
   var u = USERS[c.userId] || { name: c.userId, username: "", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed="+c.userId };
-  // 🩹 FIX (badge "Responder" sem lógica): antes bastava a última
-  // mensagem não ser minha — então ela aparecia até em conversa que eu
-  // nunca abri (mensagem não lida) e, quando o lastSenderId vinha com o
-  // uid do Firebase em vez do ME_ID, aparecia até nas MINHAS mensagens.
-  // Agora a badge só aparece quando: (1) a última mensagem é realmente
-  // da outra pessoa, (2) eu JÁ VI essa mensagem (abri a conversa depois
-  // dela) e (3) a conversa não está aberta agora — ou seja, eu vi e saí
-  // sem responder.
-  var _lastIsMine = !!c.lastSenderId && (
-    c.lastSenderId === ME_ID ||
-    (typeof _fbUid !== "undefined" && _fbUid && c.lastSenderId === _fbUid)
-  );
-  var _sawLast = !!(c.myLastRead && c._lastTimeRaw && c.myLastRead >= c._lastTimeRaw);
-  var isMyTurn = !!c.lastSenderId && !_lastIsMine && !c.unread && _sawLast &&
-    state.activeConvoId !== c.id;
+  var isMyTurn = shouldShowReplyPrompt(c);
 
   return '<div class="convo-row" data-open-convo="'+c.id+'" data-convo-id="'+c.id+'" data-convo-longpress="'+c.id+'">' +
     '<div data-open-author="'+c.userId+'">'+avatarHtml(u.avatar, 50, c.online, false, false, null, null, getUserFrame(u))+'</div>' +
@@ -12861,8 +12874,15 @@ function bindMsgsPage() {
   appEl.querySelectorAll("[data-open-convo]").forEach(function(row) {
     row.addEventListener("click", function(e) {
       if (e.target.closest("[data-open-author]")) return;
-      state.activeConvoId = row.getAttribute("data-open-convo");
-      var conv = CONVOS.find(function(c){ return c.id === state.activeConvoId; });
+      var convoId = row.getAttribute("data-open-convo");
+      var conv = CONVOS.find(function(c){ return c.id === convoId; });
+      // Se o aviso já estava visível, esta nova abertura o dispensa. Não
+      // dispensa na primeira abertura de uma mensagem ainda não visualizada.
+      if (conv && shouldShowReplyPrompt(conv)) {
+        conv.replyPromptDismissedFor = conv._lastTimeRaw;
+        FB.dismissReplyPrompt(convoId, conv._lastTimeRaw);
+      }
+      state.activeConvoId = convoId;
       if (conv) conv.unread = 0;
       _lastAutoScrolledConvoId = null; // FIX: garante scroll pro fim ao (re)abrir a conversa
       startChatPolling();
