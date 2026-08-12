@@ -16069,10 +16069,34 @@ function profileTabItems(userId, tab) {
 // Ela vive "ao lado" do Perfil: dá pra chegar lá arrastando a tela de
 // Perfil para a esquerda (ou tocando na engrenagem), e voltar arrastando
 // para a direita (ou tocando em "voltar").
+// ⚡ PERF (Configurações lenta / trocar pra aba Perfil lento): antes, TODA
+// vez que a tela renderizava de novo enquanto você estava na aba Perfil —
+// inclusive por causa de um poll de fundo sem nenhuma relação com o
+// Perfil (presença, conversas...) — essa função montava os DOIS painéis
+// do zero: o Perfil inteiro (grade de posts com imagens) E as
+// Configurações inteiras, mesmo com só um deles visível na tela. Isso
+// dobrava o custo de todo render enquanto você ficava parado ali, e
+// deixava tanto a troca de aba quanto abrir Configurações mais lentos.
+// Agora só o painel VISÍVEL é reconstruído do zero a cada render; o
+// painel escondido reaproveita a última versão pronta (só é reconstruído
+// na primeira vez, pra existir fisicamente no DOM e permitir o arrasto
+// entre os dois). Isso nunca mostra dado desatualizado: qualquer ação
+// que muda o conteúdo de um painel só acontece dentro dele mesmo, e o
+// painel volta a ser reconstruído do zero no exato momento em que passa
+// a ser o visível de novo (goToSettingsPanel/goToProfilePanel chamam
+// render() na hora).
+var _cachedProfileHtml = null;
+var _cachedSettingsHtml = null;
 function renderProfileWithSettings() {
   var atSettings = state.profileSubView === "settings";
-  var profileHtml = renderProfilePage(ME_ID);
-  var settingsHtml = renderSettingsPage();
+  var profileHtml, settingsHtml;
+  if (atSettings) {
+    settingsHtml = _cachedSettingsHtml = renderSettingsPage();
+    profileHtml = _cachedProfileHtml || (_cachedProfileHtml = renderProfilePage(ME_ID));
+  } else {
+    profileHtml = _cachedProfileHtml = renderProfilePage(ME_ID);
+    settingsHtml = _cachedSettingsHtml || (_cachedSettingsHtml = renderSettingsPage());
+  }
   return '<div class="profile-swipe-wrap" data-profile-swipe>' +
     '<div class="profile-swipe-track" id="profileSwipeTrack" style="transform:translateX('+(atSettings?"-50%":"0%")+');">' +
       '<div class="profile-swipe-panel">' + profileHtml + '</div>' +
