@@ -4882,6 +4882,26 @@ var ImageGateway = (function () {
   var _urlCache = {}; // filePath -> { url, expiresAt }
   var _inflight = {}; // filePath -> Promise (evita pedidos duplicados em paralelo)
 
+  // Reaproveita URLs assinadas ainda válidas depois de recarregar o app.
+  // O cache continua respeitando a expiração e nunca guarda o arquivo em si.
+  try {
+    var savedUrlCache = JSON.parse(localStorage.getItem("mimi_image_url_cache") || "{}");
+    var cacheNow = Math.floor(Date.now() / 1000);
+    Object.keys(savedUrlCache).forEach(function(key){
+      var item = savedUrlCache[key];
+      if (item && item.url && item.expiresAt - 300 > cacheNow) _urlCache[key] = item;
+    });
+  } catch(e) {}
+
+  function persistUrlCache() {
+    try {
+      var keys = Object.keys(_urlCache).slice(-120);
+      var compact = {};
+      keys.forEach(function(key){ compact[key] = _urlCache[key]; });
+      localStorage.setItem("mimi_image_url_cache", JSON.stringify(compact));
+    } catch(e) {}
+  }
+
   function firstString(obj, keys) {
     if (typeof obj === "string") return obj;
     obj = obj || {};
@@ -4932,6 +4952,7 @@ var ImageGateway = (function () {
         var expiresAt = Number((d && (d.expiresAt || d.expires_at)) || (now + (expireSeconds || 3600)));
         if (expiresAt > 1000000000000) expiresAt = Math.floor(expiresAt / 1000);
         _urlCache[filePath] = { url: url, expiresAt: expiresAt };
+        persistUrlCache();
         delete _inflight[filePath];
         return url;
       }).catch(function (e) { delete _inflight[filePath]; throw e; });
@@ -6303,7 +6324,30 @@ var FB = {
   // FIX acima em loadConvos), busca a última mensagem real da subcoleção
   // e usa ela pra preencher preview + remetente na lista de conversas.
   _repairConvoPreview: function(convoId, otherId, myId) {
-    fsList("convos/"+convoId+"/messages").then(function(msgs) {
+    // Um reparo por conversa e no máximo dois simultâneos: evita que contas
+    // com muitos previews antigos congestionem toda a rede durante o boot.
+    FB._previewRepairTried = FB._previewRepairTried || Object.create(null);
+    FB._previewRepairQueue = FB._previewRepairQueue || [];
+    FB._previewRepairActive = FB._previewRepairActive || 0;
+    if (FB._previewRepairTried[convoId]) return;
+    FB._previewRepairTried[convoId] = true;
+    FB._previewRepairQueue.push({ convoId:convoId, otherId:otherId, myId:myId });
+    FB._drainPreviewRepairs();
+  },
+
+  _drainPreviewRepairs: function() {
+    while (FB._previewRepairActive < 2 && FB._previewRepairQueue && FB._previewRepairQueue.length) {
+      var job = FB._previewRepairQueue.shift();
+      FB._previewRepairActive++;
+      FB._runPreviewRepair(job.convoId, job.otherId, job.myId).finally(function(){
+        FB._previewRepairActive--;
+        FB._drainPreviewRepairs();
+      });
+    }
+  },
+
+  _runPreviewRepair: function(convoId, otherId, myId) {
+    return fsList("convos/"+convoId+"/messages").then(function(msgs) {
       if (!msgs || !msgs.length) return;
       msgs.sort(function(a,b){ return (a.createdAt||"").localeCompare(b.createdAt||""); });
       var lastMsg = null;
@@ -6326,7 +6370,7 @@ var FB = {
       conv.time = _relTime(lastMsg.createdAt || new Date().toISOString());
       conv._lastTimeRaw = lastMsg.createdAt || conv._lastTimeRaw;
       conv.lastSenderId = (lastMsg.senderId === myId || lastMsg.senderId === _fbUid) ? myId : otherId;
-      backgroundRender();
+      renderSoon(80);
     }).catch(function(){});
   },
 
@@ -6336,7 +6380,9 @@ var FB = {
     var myId = ME_ID;
     // Limpa conversas demo (ids c1–c4) antes de carregar as reais
     CONVOS.length = 0;
-    return fsList("convos").then(function(docs) {
+    return fsQuery("convos", "members", "ARRAY_CONTAINS", myId).catch(function(){
+      return fsList("convos");
+    }).then(function(docs) {
       docs.forEach(function(doc) {
         var members = doc.members || [];
         if (members.indexOf(myId) === -1 && members.indexOf(_fbUid) === -1) return;
@@ -6381,11 +6427,7 @@ var FB = {
           _lastTimeRaw: doc.lastTime || null,
           lastSenderId: doc.lastSenderId || null,
         });
-        if (!USERS[otherId]) {
-          fsGet("users/"+otherId).then(function(u) {
-            if (u) { delete u._id; u.uid = otherId; USERS[otherId] = u; backgroundRender(); }
-          }).catch(function(){});
-        }
+        if (!USERS[otherId]) fetchUserOnce(otherId);
         // 🩹 FIX (preview/aviso "Responder" sumidos juntos OU só o aviso
         // sozinho): antes só reparava quando lastMsg vinha ausente do doc,
         // assumindo que lastMsg e lastSenderId sempre se perdem juntos. Mas
@@ -7049,13 +7091,15 @@ function jitterMs(base) { return base + Math.floor(Math.random() * Math.min(4000
 // nunca há duas reconstruções em sequência imediata.
 var _renderSoonTimer = null;
 function renderSoon(delay) {
-  if (_renderSoonTimer) clearTimeout(_renderSoonTimer);
+  // O debounce antigo reiniciava os 450ms a cada resposta de rede. No boot,
+  // respostas contínuas podiam adiar a pintura de conversas por vários segundos.
+  // Agora é throttle: a primeira atualização agenda uma pintura e as demais
+  // apenas entram no mesmo lote, sem empurrar o prazo para a frente.
+  if (_renderSoonTimer) return;
   _renderSoonTimer = setTimeout(function() {
     _renderSoonTimer = null;
-    // Não atropela quem está digitando, animando o sheet, em chamada etc.:
-    // backgroundRender() já conhece todas essas guardas.
     backgroundRender();
-  }, delay || 450);
+  }, typeof delay === "number" ? delay : 80);
 }
 // Uma renderização do Feed pode descobrir vários autores que ainda não estão
 // no cache. Sem marcar a busca como "em andamento", cada reconstrução iniciava
@@ -7063,6 +7107,14 @@ function renderSoon(delay) {
 // chamava render() novamente e criava o ciclo visual de piscar/travar.
 var _userFetchPending = Object.create(null);
 var _userFetchTried = Object.create(null);
+var _userFetchRenderTimer = null;
+function scheduleUserBatchRender() {
+  if (_userFetchRenderTimer) return;
+  _userFetchRenderTimer = setTimeout(function() {
+    _userFetchRenderTimer = null;
+    backgroundRender();
+  }, 80);
+}
 function fetchUserOnce(uid, onLoaded) {
   if (!uid || USERS[uid] || !_idToken || _userFetchPending[uid] || _userFetchTried[uid]) return;
   _userFetchPending[uid] = true;
@@ -7072,6 +7124,7 @@ function fetchUserOnce(uid, onLoaded) {
     u.uid = uid;
     USERS[uid] = u;
     if (typeof onLoaded === "function") onLoaded(u);
+    else scheduleUserBatchRender();
   }).catch(function(){}).then(function() {
     delete _userFetchPending[uid];
     _userFetchTried[uid] = true;
@@ -7252,8 +7305,9 @@ function startConvoListPolling() {
   if (!_idToken || !_fbUid) return;
   _convoListPollInterval = setInterval(pollGuard(function() {
     if (!_idToken || !_fbUid) { stopConvoListPolling(); return; }
+    if (document.hidden) return;
     refreshConvoList();
-  }), jitterMs(10000));
+  }), jitterMs(30000));
 }
 function stopConvoListPolling() {
   if (_convoListPollInterval) { clearInterval(_convoListPollInterval); _convoListPollInterval = null; }
@@ -7291,11 +7345,7 @@ function _applyConvoDoc(doc, myId) {
     };
     CONVOS.unshift(conv);
     changed = true;
-    if (!USERS[otherId]) {
-      fsGet("users/"+otherId).then(function(u) {
-        if (u) { delete u._id; u.uid = otherId; USERS[otherId] = u; backgroundRender(); }
-      }).catch(function(){});
-    }
+    if (!USERS[otherId]) fetchUserOnce(otherId);
   }
 
   // Só reage se o Firestore tem uma mensagem mais nova do que a
@@ -7353,7 +7403,12 @@ function _applyConvoDoc(doc, myId) {
 
 function refreshConvoList() {
   var myId = ME_ID;
-  fsList("convos").then(function(docs) {
+  // Filtra no servidor: antes cada atualização baixava a coleção inteira.
+  // Mantém o fallback antigo para instalações cujo gateway ainda não aceite
+  // ARRAY_CONTAINS, sem impedir o carregamento das conversas.
+  fsQuery("convos", "members", "ARRAY_CONTAINS", myId).catch(function(){
+    return fsList("convos");
+  }).then(function(docs) {
     var changed = false;
     docs.forEach(function(doc) {
       if (_applyConvoDoc(doc, myId)) changed = true;
@@ -7708,10 +7763,11 @@ function clearChatMsgsPanelSpacing() {
 
 
 function checkOnlineStatus(convos) {
-  // Para cada conversa, verifica o status online do outro utilizador
-  // MAS: só refaz a verificação a cada 30s para evitar excesso de reads
+  // Limita a presença aos contatos visíveis. Disparar uma requisição para
+  // cada conversa de uma vez congestionava a rede e atrasava avatares/telas.
   var now = Date.now();
-  convos.forEach(function(conv) {
+  var visible = (convos || []).filter(function(conv) { return !conv.archived; }).slice(0, 12);
+  visible.forEach(function(conv) {
     if (!conv.userId) return;
     var lastCheck = _lastOnlineCheck[conv.userId] || 0;
     // Se já foi checado nos últimos 30s, pula
@@ -7786,6 +7842,7 @@ function startNotifPolling() {
   // ✅ FIX 5a: Aumentar de 12s para 20s, passa _lastNotifCheck para busca incremental
   _notifPollInterval = setInterval(pollGuard(function() {
     if (!_idToken || !_fbUid) { stopNotifPolling(); return; }
+    if (document.hidden) return;
     FB.loadNotifs(_lastNotifCheck).then(function(docs) {
       if (!docs || !docs.length) return;
       var changed = false;
@@ -7856,7 +7913,7 @@ function startNotifPolling() {
       _lastNotifCheck = new Date().toISOString();
       if (changed && state.page === "notifs") backgroundRender();
     }).catch(function(){});
-  }), jitterMs(20000));  // 🚀 Reduzido de 12s para 20s (4 vezes por minuto em vez de 5)
+  }), jitterMs(45000));
 }
 
 function stopNotifPolling() {
@@ -7874,12 +7931,12 @@ function startStoryPolling() {
   if (!_idToken || !_fbUid) return;
   // ✅ FIX 5b: Aumentar de 8s para 15s, passa _lastStoryCheck para busca incremental
   _storyPollInterval = setInterval(pollGuard(function() {
-    if (!_idToken || !_fbUid) { stopStoryPolling(); return; }
-    FB.loadStories(_lastStoryCheck).then(function(){ 
+    if (!_idToken || !_fbUid || document.hidden) return;
+    FB.loadStories(_lastStoryCheck).then(function(){
       _lastStoryCheck = new Date().toISOString();
-      backgroundRender(); 
+      if (state.page === "feed") backgroundRender();
     }).catch(function(){});
-  }), jitterMs(15000));  // 🚀 Reduzido de 8s para 15s (4 vezes por minuto em vez de 7.5)
+  }), jitterMs(45000));  // 🚀 Reduzido de 8s para 15s (4 vezes por minuto em vez de 7.5)
 }
 function stopStoryPolling() {
   if (_storyPollInterval) { clearInterval(_storyPollInterval); _storyPollInterval = null; }
@@ -7902,16 +7959,26 @@ function startPostsReactionPolling() {
   stopPostsReactionPolling();
   if (!_idToken || !_fbUid) return;
   _postsReactionPollInterval = setInterval(pollGuard(function() {
-    if (!_idToken || !_fbUid) { stopPostsReactionPolling(); return; }
+    if (!_idToken || !_fbUid || document.hidden || (state.page !== "feed" && state.page !== "vibes")) return;
     syncPostsReactionsFromServer();
-  }), jitterMs(15000));
+  }), jitterMs(45000));
 }
 function stopPostsReactionPolling() {
   if (_postsReactionPollInterval) { clearInterval(_postsReactionPollInterval); _postsReactionPollInterval = null; }
 }
 function syncPostsReactionsFromServer() {
   if (!_idToken) return;
-  fsList("posts").then(function(docs) {
+  // Atualiza apenas os posts já carregados (máximo de 12 por rodada). A
+  // implementação anterior baixava a coleção inteira periodicamente, ficando
+  // progressivamente mais lenta conforme o app acumulava publicações.
+  var visiblePosts = posts.slice(0, 12);
+  Promise.all(visiblePosts.map(function(post){
+    return fsGet("posts/" + post.id).then(function(doc){
+      if (doc) doc._id = post.id;
+      return doc;
+    }).catch(function(){ return null; });
+  })).then(function(docs) {
+    docs = docs.filter(Boolean);
     if (!docs || !docs.length) return;
     var changed = false;
     docs.forEach(function(d) {
@@ -8474,7 +8541,7 @@ function startChatPolling() {
   // o foco do campo por um instante) e fazia o scroll "pular" para o meio
   // da conversa em vez de ficar perto da caixa de digitar.
   // ✅ FIX 5c: Aumentar de 3s para 8s, passa _lastMessageCheck para busca incremental
-  _pollInterval = setInterval(function() {
+  function runChatPoll() {
     if (!state.activeConvoId || !_idToken) { stopChatPolling(); return; }
     try {
       _updateRtIndicator(); // reafirma o ícone ⚡/🔄 mesmo depois de um render que recriou o cabeçalho
@@ -8510,7 +8577,18 @@ function startChatPolling() {
     } catch (e) {
       console.error("Erro no polling:", e);
     }
-  }, 3000);  // ✅ Voltou de 8s pra 3s: com 8s, tanto mensagens novas quanto o
+  }
+  // Quando o tempo real está saudável, a consulta REST vira apenas uma rede
+  // de segurança menos frequente. Sem tempo real, preserva a resposta de 3s.
+  function scheduleNextChatPoll() {
+    if (!state.activeConvoId || !_idToken) return;
+    var delay = _rtActiveConvoId === state.activeConvoId ? 8000 : 3000;
+    _pollInterval = setTimeout(function(){
+      runChatPoll();
+      scheduleNextChatPoll();
+    }, delay);
+  }
+  scheduleNextChatPoll();  // ✅ Voltou de 8s pra 3s: com 8s, tanto mensagens novas quanto o
              // "visualizada" demoravam a aparecer. Isso gasta mais leituras no
              // Firestore (cada tick faz 1 leitura de mensagens + 1 do doc da
              // conversa pro status de leitura), mas só enquanto o chat está
@@ -9376,6 +9454,8 @@ function bindGlobalHandlers() {
       // requestAnimationFrame deixa o navegador pintar o estado "ativo" do
       // botão antes de fazer o render pesado da tela nova, então o toque
       // sente-se instantâneo mesmo numa tela com bastante conteúdo.
+      // Renderiza no próximo quadro; o trabalho de rede continua em segundo
+      // plano e nunca bloqueia a abertura imediata da aba.
       requestAnimationFrame(function() {
         render();
         _navSwitching = false;
@@ -20157,7 +20237,11 @@ function checkAgeVerificationLinkFromUrl() {
         // pendente no Supabase (ex.: de uma sessão anterior sem conexão),
         // agora no boot e depois a cada 60s enquanto o app estiver aberto.
         flushAllPendingWrites();
-        setInterval(flushAllPendingWrites, 60000);
+        if (!window._mimiPendingWritesInterval) {
+          window._mimiPendingWritesInterval = setInterval(function(){
+            if (!document.hidden) flushAllPendingWrites();
+          }, 60000);
+        }
 
         // ── 1. Posts do Firestore ──
         // FIX: ver comentário em loadPostsWithRetryAndRerender() — evita
