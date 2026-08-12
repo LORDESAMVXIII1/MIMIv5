@@ -6295,7 +6295,13 @@ var FB = {
   markConvoRead: function(convoId) {
     if (!_idToken || !convoId || !ME_ID) return Promise.resolve();
     var field = {};
-    field["lastRead_" + ME_ID] = new Date().toISOString();
+    var _nowIso = new Date().toISOString();
+    field["lastRead_" + ME_ID] = _nowIso;
+    // 🩹 FIX (badge "Responder"): guarda localmente ATÉ QUANDO eu já vi
+    // essa conversa. É esse carimbo que decide se a badge pode aparecer
+    // (só depois de eu ter visto a mensagem da outra pessoa).
+    var _cv = CONVOS.find(function(c){ return c.id === convoId; });
+    if (_cv) _cv.myLastRead = _nowIso;
     return fsSet("convos/" + convoId, field, true).catch(function(){});
   },
 
@@ -6362,6 +6368,7 @@ var FB = {
           existingConv.lastSenderId = doc.lastSenderId || null;
           existingConv._lastTimeRaw = doc.lastTime || existingConv._lastTimeRaw;
           existingConv.unread = (isFromOther && !alreadyRead) ? 1 : 0;
+          if (myLastRead && (!existingConv.myLastRead || myLastRead > existingConv.myLastRead)) existingConv.myLastRead = myLastRead;
           existingConv.pinned = doc.pinned || false;
           existingConv.archived = doc.archived || false;
           existingConv.otherLastRead = doc["lastRead_" + otherId] || existingConv.otherLastRead;
@@ -6380,6 +6387,7 @@ var FB = {
           activeTicTacRoomId: doc.activeTicTacRoomId || null,
           _lastTimeRaw: doc.lastTime || null,
           lastSenderId: doc.lastSenderId || null,
+          myLastRead: myLastRead || null,
         });
         if (!USERS[otherId]) {
           fsGet("users/"+otherId).then(function(u) {
@@ -7322,6 +7330,7 @@ function _applyConvoDoc(doc, myId) {
       activeTicTacRoomId: doc.activeTicTacRoomId || null,
       _lastTimeRaw: doc.lastTime || null,
       lastSenderId: doc.lastSenderId || null,
+      myLastRead: myLastRead0 || null,
     };
     CONVOS.unshift(conv);
     changed = true;
@@ -7344,6 +7353,7 @@ function _applyConvoDoc(doc, myId) {
     var isFromOther = doc.lastSenderId && doc.lastSenderId !== myId && doc.lastSenderId !== _fbUid;
     var myLastRead = doc["lastRead_" + myId] || null;
     var alreadyRead = myLastRead && myLastRead >= doc.lastTime;
+    if (myLastRead && (!conv.myLastRead || myLastRead > conv.myLastRead)) conv.myLastRead = myLastRead;
     // Não marca como não-lida se essa conversa está aberta na tela
     // agora mesmo (o polling do chat já cuida de marcar como vista).
     if (isFromOther && !alreadyRead && state.activeConvoId !== conv.id) {
@@ -12513,7 +12523,21 @@ function renderConvoLastPreview(text) {
 
 function renderConvoRow(c, insideCard) {
   var u = USERS[c.userId] || { name: c.userId, username: "", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed="+c.userId };
-  var isMyTurn = !!(c.lastSenderId && c.lastSenderId !== ME_ID);
+  // 🩹 FIX (badge "Responder" sem lógica): antes bastava a última
+  // mensagem não ser minha — então ela aparecia até em conversa que eu
+  // nunca abri (mensagem não lida) e, quando o lastSenderId vinha com o
+  // uid do Firebase em vez do ME_ID, aparecia até nas MINHAS mensagens.
+  // Agora a badge só aparece quando: (1) a última mensagem é realmente
+  // da outra pessoa, (2) eu JÁ VI essa mensagem (abri a conversa depois
+  // dela) e (3) a conversa não está aberta agora — ou seja, eu vi e saí
+  // sem responder.
+  var _lastIsMine = !!c.lastSenderId && (
+    c.lastSenderId === ME_ID ||
+    (typeof _fbUid !== "undefined" && _fbUid && c.lastSenderId === _fbUid)
+  );
+  var _sawLast = !!(c.myLastRead && c._lastTimeRaw && c.myLastRead >= c._lastTimeRaw);
+  var isMyTurn = !!c.lastSenderId && !_lastIsMine && !c.unread && _sawLast &&
+    state.activeConvoId !== c.id;
 
   return '<div class="convo-row" data-open-convo="'+c.id+'" data-convo-id="'+c.id+'" data-convo-longpress="'+c.id+'">' +
     '<div data-open-author="'+c.userId+'">'+avatarHtml(u.avatar, 50, c.online, false, false, null, null, getUserFrame(u))+'</div>' +
