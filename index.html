@@ -9324,29 +9324,44 @@ function closePostDetail() {
   history.back();
 }
 
-// ─── LINK DIRETO (e-mails de denúncia: ?post=ID&comment=ID) ────
+// ─── LINK DIRETO (compartilhamento de post/perfil, e-mails de denúncia: ?post=ID&comment=ID) ────
 var _deepLinkHandled = false;
 function handleDeepLinkFromUrl() {
   if (_deepLinkHandled) return;
   try {
     var params = new URLSearchParams(window.location.search);
     var pid = params.get("post");
-    if (!pid) return;
-    var post = posts.find(function(p){ return p.id === pid; });
-    if (!post) return; // post ainda não carregado ou foi excluído — tenta de novo no próximo loadPosts
-    _deepLinkHandled = true;
-    var cid = params.get("comment");
-    state.postDetailId = pid;
-    state.openComments[pid] = true;
-    if (cid) {
-      state.highlightCommentId = cid;
-      expandReplyAncestors(pid, cid);
+    var uidParam = params.get("profile");
+
+    if (pid) {
+      var post = posts.find(function(p){ return p.id === pid; });
+      if (!post) return; // post ainda não carregado ou foi excluído — tenta de novo no próximo loadPosts
+      _deepLinkHandled = true;
+      var cid = params.get("comment");
+      state.postDetailId = pid;
+      state.openComments[pid] = true;
+      if (cid) {
+        state.highlightCommentId = cid;
+        expandReplyAncestors(pid, cid);
+      }
+      render();
+      if (window.history && window.history.replaceState) {
+        window.history.replaceState({}, "", window.location.origin + window.location.pathname);
+      }
+      if (cid) scrollToHighlightedComment(cid, 0);
+      return;
     }
-    render();
-    if (window.history && window.history.replaceState) {
-      window.history.replaceState({}, "", window.location.origin + window.location.pathname);
+
+    if (uidParam) {
+      // openProfile busca os dados mais recentes no Firestore por conta
+      // própria, então não precisamos esperar o usuário já estar em
+      // USERS[] — diferente do post, que precisa existir em posts[] antes.
+      _deepLinkHandled = true;
+      openProfile(uidParam);
+      if (window.history && window.history.replaceState) {
+        window.history.replaceState({}, "", window.location.origin + window.location.pathname);
+      }
     }
-    if (cid) scrollToHighlightedComment(cid, 0);
   } catch(e) { console.error("Erro ao abrir link de denúncia:", e); }
 }
 function expandReplyAncestors(pid, cid) {
@@ -11443,7 +11458,7 @@ function bindPostCardEvents(root) {
     btn.addEventListener("click", function(e) { 
       e.stopPropagation();
       var postId = btn.getAttribute("data-share-post");
-      var shareUrl = window.location.origin + "?post=" + postId;
+      var shareUrl = window.location.origin + window.location.pathname + "?post=" + postId;
 
       function countShare() {
         if (typeof FB !== "undefined" && FB.incrementShareCount) {
@@ -12054,7 +12069,7 @@ function bindProfileSheet() {
       var userId = state.profileSheetUserId;
       state.profileSheetUserId = null;
       if (action === "share") {
-        var shareUrl = window.location.origin + "?profile=" + userId;
+        var shareUrl = window.location.origin + window.location.pathname + "?profile=" + userId;
         if (navigator.clipboard && navigator.clipboard.writeText) {
           navigator.clipboard.writeText(shareUrl).then(function() {
             showToast(toastWithIcon("Link do perfil copiado!", "link"), true);
