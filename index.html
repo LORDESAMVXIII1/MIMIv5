@@ -7013,6 +7013,39 @@ document.addEventListener("scroll", function() {
     _flushPendingBackgroundRender();
   }, 200);
 }, { capture: true, passive: true });
+// ⚡ PERF (toque não responde / precisa tocar mais de uma vez): um poll de
+// fundo (conversas, notificações, presença...) podia cair EXATAMENTE
+// entre o dedo tocar o botão e soltar — reconstruindo o HTML inteiro no
+// meio do gesto. O elemento que recebeu o toque deixa de existir (foi
+// substituído por um novo, idêntico visualmente) antes do navegador
+// terminar de processar o toque como um clique, e o clique se perde
+// silenciosamente. Por fora parece só "o app não respondeu" — só voltava
+// a funcionar no toque seguinte, que aí já não coincide com nenhum poll.
+// Mesmo padrão do guard de rolagem acima: enquanto um toque estiver em
+// andamento (do touchstart/mousedown até ~80ms depois do touchend/
+// mouseup, tempo de sobra pro clique sintético do navegador disparar),
+// backgroundRender() só marca a atualização como pendente e aplica logo
+// em seguida. Não afeta o render() disparado pelo PRÓPRIO clique do
+// usuário (esse continua instantâneo, como sempre foi) — só atrasa em
+// milissegundos as atualizações que vêm de fundo, sem o usuário pedir.
+var _isPointerDown = false;
+var _pointerIdleTimer = null;
+function _markPointerActive() {
+  _isPointerDown = true;
+  clearTimeout(_pointerIdleTimer);
+}
+function _markPointerIdleSoon() {
+  clearTimeout(_pointerIdleTimer);
+  _pointerIdleTimer = setTimeout(function() {
+    _isPointerDown = false;
+    _flushPendingBackgroundRender();
+  }, 80);
+}
+document.addEventListener("touchstart", _markPointerActive, { capture: true, passive: true });
+document.addEventListener("touchend", _markPointerIdleSoon, { capture: true, passive: true });
+document.addEventListener("touchcancel", _markPointerIdleSoon, { capture: true, passive: true });
+document.addEventListener("mousedown", _markPointerActive, { capture: true, passive: true });
+document.addEventListener("mouseup", _markPointerIdleSoon, { capture: true, passive: true });
 var _publishSheetAnimating = false; // true durante os ~220ms da animação de abrir o menu "+Publicar" — evita que um poll de fundo compita pela thread com a animação
 // FIX (tremor do sheet "+Publicar"): além de segurar o backgroundRender(),
 // seguramos o TRABALHO INTEIRO dos pollings de fundo (requisição de rede +
@@ -7140,6 +7173,7 @@ function _isChatComposeActive() {
 // (que não é uma resposta direta a uma ação do usuário nesse instante).
 function backgroundRender() {
   if (_isUserScrolling) { _pendingBackgroundRender = true; return; }
+  if (_isPointerDown) { _pendingBackgroundRender = true; return; }
   // FIX (tremor ao abrir "+Publicar"): um poll de fundo (lista de conversas,
   // reações, stories, notificações) podia cair bem no meio dos ~220ms da
   // animação de abrir o sheet, competindo pela thread principal e fazendo o
