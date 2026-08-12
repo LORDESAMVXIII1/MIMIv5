@@ -6990,6 +6990,29 @@ function _isTextFieldEl(el) {
 }
 var _isTypingInField = false;
 var _pendingBackgroundRender = false;
+// ⚡ PERF ("engasgos" ao rolar QUALQUER lista): os pollings de fundo
+// (conversas, notificações, stories, reações, presença) já evitavam
+// reconstruir a tela em alguns lugares específicos (Vibes, Feed, cartas,
+// jogos, chamada...), mas nada impedia um deles de cair bem no meio de
+// uma rolagem em qualquer OUTRA tela (lista de conversas, busca,
+// notificações, tela de molduras etc.) — reconstruir o HTML inteiro
+// enquanto o dedo ainda está arrastando a lista é o que sente como um
+// travadinha/engasgo. Agora, um scroll em qualquer lugar do app arma
+// esta flag por ~200ms depois do último evento de rolagem; enquanto ela
+// estiver ligada, backgroundRender() só marca a atualização como
+// pendente (dados continuam sincronizados nas listas locais) e aplica
+// assim que a rolagem parar — mesmo padrão já usado pros outros casos
+// acima, só que cobrindo rolagem em vez de um estado específico de tela.
+var _isUserScrolling = false;
+var _scrollIdleTimer = null;
+document.addEventListener("scroll", function() {
+  _isUserScrolling = true;
+  clearTimeout(_scrollIdleTimer);
+  _scrollIdleTimer = setTimeout(function() {
+    _isUserScrolling = false;
+    _flushPendingBackgroundRender();
+  }, 200);
+}, { capture: true, passive: true });
 var _publishSheetAnimating = false; // true durante os ~220ms da animação de abrir o menu "+Publicar" — evita que um poll de fundo compita pela thread com a animação
 // FIX (tremor do sheet "+Publicar"): além de segurar o backgroundRender(),
 // seguramos o TRABALHO INTEIRO dos pollings de fundo (requisição de rede +
@@ -7116,6 +7139,7 @@ function _isChatComposeActive() {
 // Chamar isto em vez de render() direto em qualquer atualização "de fundo"
 // (que não é uma resposta direta a uma ação do usuário nesse instante).
 function backgroundRender() {
+  if (_isUserScrolling) { _pendingBackgroundRender = true; return; }
   // FIX (tremor ao abrir "+Publicar"): um poll de fundo (lista de conversas,
   // reações, stories, notificações) podia cair bem no meio dos ~220ms da
   // animação de abrir o sheet, competindo pela thread principal e fazendo o
