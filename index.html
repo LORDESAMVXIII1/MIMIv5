@@ -18,10 +18,10 @@
     --accent:#ff6fa5; --accentL:#ffa6c9; --pink:#ff4d8d; --green:#5fd9a4;
     --text:#f0e0ea; --sub:#c49ab8; --muted:#6a4a60;
   }
-  body.theme-yellow {
-    --bg:#fffbea; --surface:#ffffff; --card:#ffffff; --border:#ffe78a;
-    --accent:#f5a623; --accentL:#f7c96e; --pink:#e88a00; --green:#5fd9a4;
-    --text:#3a2e00; --sub:#8a6a00; --muted:#e8d080;
+  body.theme-purple {
+    --bg:#170f22; --surface:#231733; --card:#231733; --border:#3a2850;
+    --accent:#a374ff; --accentL:#c9aeff; --pink:#d38cff; --green:#5fd9a4;
+    --text:#efe6ff; --sub:#b19ad9; --muted:#5c4a7a;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   * {
@@ -8632,7 +8632,7 @@ var state = {
   userSearchResults: [],
   hideArchived: true,  // ✅ NOVO: ocultar conversas arquivadas por padrão
   subsOpen: false,  // tela de assinatura MIMI Plus
-  appTheme: "default", // "default" | "dark" | "yellow"
+  appTheme: "default", // "default" | "dark" | "purple"
   openComments: {}, // pid -> true, lembra quais caixas de comentário estão abertas entre re-renders
   loadedComments: {}, // pid -> true, evita recarregar do Firestore toda vez que a caixa abre
   highlightCommentId: null, // usado pelo link de denúncia (?post=...&comment=...) pra rolar e destacar o comentário certo
@@ -18448,9 +18448,9 @@ function bindCreatePost() {
 
 // ─── CONFIGURAÇÕES ────────────────────────────────────────────
 function applyTheme(theme) {
-  document.body.classList.remove("theme-dark", "theme-yellow");
+  document.body.classList.remove("theme-dark", "theme-purple");
   if (theme === "dark")   document.body.classList.add("theme-dark");
-  if (theme === "yellow") document.body.classList.add("theme-yellow");
+  if (theme === "purple") document.body.classList.add("theme-purple");
   state.appTheme = theme;
   try { localStorage.setItem("mimi_theme", theme); } catch(e){}
 }
@@ -18462,7 +18462,7 @@ function renderSettingsPage() {
   var themeCircles = [
     { key:"default", colors:["#fff5f8","#ff6fa5"], label:"Rosa" },
     { key:"dark",    colors:["#1a1020","#ff6fa5"], label:"Escuro" },
-    { key:"yellow",  colors:["#fffbea","#f5a623"], label:"Amarelo" },
+    { key:"purple",  colors:["#170f22","#a374ff"], label:"Lilás" },
   ];
 
   var html = '<div style="padding-bottom:80px;">' +
