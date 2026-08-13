@@ -5369,7 +5369,7 @@ function backfillFirebaseToSupabase() {
 // já abre a caixa de comentários rolada/destacada no comentário denunciado).
 // Ver handleDeepLinkFromUrl() (chamada no boot do app) para o outro lado.
 function buildPostDeepLink(postId, commentId) {
-  var base = window.location.origin + window.location.pathname;
+  var base = "https://mimi-preview.franciscoviei123.workers.dev/";
   var url = base + "?post=" + encodeURIComponent(postId);
   if (commentId) url += "&comment=" + encodeURIComponent(commentId);
   return url;
@@ -11458,7 +11458,7 @@ function bindPostCardEvents(root) {
     btn.addEventListener("click", function(e) { 
       e.stopPropagation();
       var postId = btn.getAttribute("data-share-post");
-      var shareUrl = window.location.origin + window.location.pathname + "?post=" + postId;
+      var shareUrl = "https://mimi-preview.franciscoviei123.workers.dev/" + "?post=" + postId;
 
       function countShare() {
         if (typeof FB !== "undefined" && FB.incrementShareCount) {
