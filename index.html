@@ -7003,22 +7003,30 @@ var FB = {
 
   // Registrar visualização de perfil. Além da notificação (que já existia),
   // agora também alimenta dois agregados usados pela feature "quem viu meu
-  // perfil": (1) um contador POR VISITANTE em "profileViews/{dono}/{visitante}"
-  // — é dele que vem a quantidade de vezes que cada pessoa visitou, exibida
-  // só pra assinantes MIMI Plus; e (2) um contador TOTAL em
-  // "users/{dono}.profileViewCount", que é o número que aparece no bonequinho
-  // do cabeçalho pra todo mundo (free e Plus). Leitura+escrita, não atômico
-  // (mesmo trade-off aceito em _bumpVibeEngagementAggregate): em baixo volume
-  // a chance de duas visitas colidirem e uma "perder" o incremento é aceitável.
+  // perfil": (1) um contador POR VISITANTE em
+  // "profileViews/{dono}/viewers/{visitante}" — é dele que vem a
+  // quantidade de vezes que cada pessoa visitou, exibida só pra assinantes
+  // MIMI Plus; e (2) um contador TOTAL em "users/{dono}.profileViewCount",
+  // que é o número que aparece no bonequinho do cabeçalho pra todo mundo
+  // (free e Plus). Leitura+escrita, não atômico (mesmo trade-off aceito em
+  // _bumpVibeEngagementAggregate): em baixo volume a chance de duas visitas
+  // colidirem e uma "perder" o incremento é aceitável.
+  // IMPORTANTE sobre o caminho: documentos no Firestore precisam de um
+  // número PAR de segmentos (coleção/doc/coleção/doc...). "profileViews/
+  // {dono}/{visitante}" tinha só 3 (ficava com "visitante" como nome de
+  // coleção, não de documento) — por isso o total batia mas a lista de
+  // visitantes nunca aparecia. Precisa do mesmo formato que "storyViews/
+  // {dono}/{itemId}/{visitante}" já usa: um nome de subcoleção fixo
+  // ("viewers") entre o dono e o visitante.
   recordProfileView: function(profileOwnerId) {
     if (!_idToken || !_fbUid || _fbUid === profileOwnerId) return Promise.resolve();
     var viewerId = _fbUid;
     var nowIso = new Date().toISOString();
     var viewerInfo = USERS[viewerId] || {};
 
-    fsGet("profileViews/" + profileOwnerId + "/" + viewerId).then(function(existing) {
+    fsGet("profileViews/" + profileOwnerId + "/viewers/" + viewerId).then(function(existing) {
       var count = (existing && existing.count) || 0;
-      return fsSet("profileViews/" + profileOwnerId + "/" + viewerId, {
+      return fsSet("profileViews/" + profileOwnerId + "/viewers/" + viewerId, {
         count: count + 1,
         lastAt: nowIso,
         name: viewerInfo.name || "Usuário",
@@ -7048,7 +7056,7 @@ var FB = {
   // outro usuário). Ordenado pela visita mais recente primeiro.
   getProfileViewers: function(profileOwnerId) {
     if (!_idToken) return Promise.resolve([]);
-    return fsList("profileViews/" + profileOwnerId).then(function(docs){
+    return fsList("profileViews/" + profileOwnerId + "/viewers").then(function(docs){
       return (docs||[]).map(function(d){
         return { uid: d._id, count: d.count || 1, lastAt: d.lastAt, name: d.name, username: d.username, avatar: d.avatar };
       }).sort(function(a,b){ return (b.lastAt||"").localeCompare(a.lastAt||""); });
