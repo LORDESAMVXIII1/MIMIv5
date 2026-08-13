@@ -9521,6 +9521,24 @@ function bindGlobalHandlers() {
       state.postDetailId = null;
       state.followListFor = null;
       state.searchQuery = "";
+      // FIX (contador de "quem viu meu perfil" sempre em 0): diferente do
+      // perfil de outras pessoas (que já era rebuscado toda vez que
+      // openProfile() rodava), o PRÓPRIO perfil nunca era recarregado do
+      // servidor depois do login — USERS[ME_ID] só mudava quando você
+      // mesmo editava algo. Como profileViewCount é incrementado no
+      // servidor por QUEM VISITA (não por você), sem esse refetch o
+      // badge continuava mostrando o valor antigo (0) pra sempre, mesmo
+      // com visitas de verdade acontecendo.
+      if (target === "profile" && _idToken && ME_ID) {
+        fsGet("users/" + ME_ID).then(function(u) {
+          if (u) {
+            delete u._id;
+            u.uid = ME_ID;
+            USERS[ME_ID] = u;
+            if (state.page === "profile") render();
+          }
+        }).catch(function(){});
+      }
       // requestAnimationFrame deixa o navegador pintar o estado "ativo" do
       // botão antes de fazer o render pesado da tela nova, então o toque
       // sente-se instantâneo mesmo numa tela com bastante conteúdo.
@@ -16593,6 +16611,9 @@ function bindProfilePage(userId) {
   var openViewersBtn = appEl.querySelector("[data-open-profileviewers]");
   if (openViewersBtn) openViewersBtn.addEventListener("click", function() {
     var targetId = openViewersBtn.getAttribute("data-open-profileviewers");
+    // Força buscar a lista de novo (não confia num cache antigo desta
+    // sessão), já que o objetivo de abrir essa tela é ver visitas recentes.
+    delete state.profileViewersCache[targetId];
     state.profileViewersFor = targetId;
     render();
   });
