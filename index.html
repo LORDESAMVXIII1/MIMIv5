@@ -1364,6 +1364,18 @@
   .follow-btn.following { background:var(--bg); color:var(--sub); border:1px solid var(--border); }
   .follow-btn.not-following { background:linear-gradient(135deg,var(--accent),var(--accentL)); color:#fff; }
 
+  /* ── Visualizações de perfil (quem viu) ──────────────────── */
+  .profile-viewers-badge { display:flex; align-items:center; gap:4px; }
+  .viewer-count-locked { display:inline-flex; align-items:center; gap:4px; }
+  .viewer-count-locked .vc-num { filter:blur(3.5px); user-select:none; -webkit-user-select:none; }
+  .viewer-lock-ic { width:16px; height:16px; border-radius:50%; background:linear-gradient(135deg,var(--accent),var(--accentL)); display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .viewers-plus-banner { margin:10px 16px 4px; background:linear-gradient(135deg,#fff0f6,#ffe4ef); border:1px solid var(--border); border-radius:14px; padding:10px 12px; display:flex; align-items:center; gap:10px; cursor:pointer; }
+  .viewers-plus-banner .vpb-ic { width:30px; height:30px; border-radius:50%; background:linear-gradient(135deg,var(--accent),var(--accentL)); flex-shrink:0; display:flex; align-items:center; justify-content:center; }
+  .viewers-plus-banner .vpb-txt { flex:1; min-width:0; }
+  .viewers-plus-banner .vpb-txt b { display:block; font-size:11.5px; }
+  .viewers-plus-banner .vpb-txt span { font-size:10px; color:var(--sub); }
+  .viewers-plus-banner .vpb-go { font-size:10.5px; font-weight:800; color:var(--pink); white-space:nowrap; flex-shrink:0; }
+
   /* ── post detail (focused) ─────────────────────────────── */
   .post-detail-header { display:flex; align-items:center; gap:12px; padding:12px 16px; border-bottom:1px solid var(--border); background:var(--bg); position:sticky; top:0; z-index:10; }
 
@@ -6989,19 +7001,58 @@ var FB = {
     });
   },
 
-  // Registrar visualização de perfil
+  // Registrar visualização de perfil. Além da notificação (que já existia),
+  // agora também alimenta dois agregados usados pela feature "quem viu meu
+  // perfil": (1) um contador POR VISITANTE em "profileViews/{dono}/{visitante}"
+  // — é dele que vem a quantidade de vezes que cada pessoa visitou, exibida
+  // só pra assinantes MIMI Plus; e (2) um contador TOTAL em
+  // "users/{dono}.profileViewCount", que é o número que aparece no bonequinho
+  // do cabeçalho pra todo mundo (free e Plus). Leitura+escrita, não atômico
+  // (mesmo trade-off aceito em _bumpVibeEngagementAggregate): em baixo volume
+  // a chance de duas visitas colidirem e uma "perder" o incremento é aceitável.
   recordProfileView: function(profileOwnerId) {
     if (!_idToken || !_fbUid || _fbUid === profileOwnerId) return Promise.resolve();
-    
+    var viewerId = _fbUid;
+    var nowIso = new Date().toISOString();
+    var viewerInfo = USERS[viewerId] || {};
+
+    fsGet("profileViews/" + profileOwnerId + "/" + viewerId).then(function(existing) {
+      var count = (existing && existing.count) || 0;
+      return fsSet("profileViews/" + profileOwnerId + "/" + viewerId, {
+        count: count + 1,
+        lastAt: nowIso,
+        name: viewerInfo.name || "Usuário",
+        username: viewerInfo.username || "",
+        avatar: viewerInfo.avatar || ""
+      });
+    }).catch(function(){});
+
+    fsGet("users/" + profileOwnerId).then(function(owner) {
+      var total = (owner && owner.profileViewCount) || 0;
+      return fsSet("users/" + profileOwnerId, { profileViewCount: total + 1 }, true);
+    }).catch(function(){});
+
     return fsSet("notifications/" + profileOwnerId + "/items/" + uid(), {
       type: "profileView",
-      fromUid: _fbUid,
-      fromName: (USERS[_fbUid] || {}).name || "Usuário",
-      fromAvatar: (USERS[_fbUid] || {}).avatar || "",
+      fromUid: viewerId,
+      fromName: viewerInfo.name || "Usuário",
+      fromAvatar: viewerInfo.avatar || "",
       text: "visitou seu perfil",
-      createdAt: new Date().toISOString(),
+      createdAt: nowIso,
       read: false
     }).catch(function(){});
+  },
+
+  // Busca quem visitou o perfil, com a contagem de visitas de cada pessoa
+  // (lista completa é do dono do perfil só — não faz sentido buscar de
+  // outro usuário). Ordenado pela visita mais recente primeiro.
+  getProfileViewers: function(profileOwnerId) {
+    if (!_idToken) return Promise.resolve([]);
+    return fsList("profileViews/" + profileOwnerId).then(function(docs){
+      return (docs||[]).map(function(d){
+        return { uid: d._id, count: d.count || 1, lastAt: d.lastAt, name: d.name, username: d.username, avatar: d.avatar };
+      }).sort(function(a,b){ return (b.lastAt||"").localeCompare(a.lastAt||""); });
+    }).catch(function(){ return []; });
   }
 };
 
@@ -8631,6 +8682,8 @@ var state = {
   viewProfileId: null,
   profileStack: [],
   followListFor: null,
+  profileViewersFor: null, // userId cuja lista "quem viu meu perfil" está aberta
+  profileViewersCache: {}, // userId -> array de visitantes já carregado (evita recarregar toda hora)
   postDetailId: null,
   actionSheetPostId: null,
   profileSheetUserId: null,
@@ -9203,6 +9256,7 @@ function _renderImpl() {
   if (showBottomNav) html += renderBottomNav(unreadNotifs, unreadMsgs);
 
   if (state.followListFor) html += renderFollowListPage();
+  if (state.profileViewersFor) html += renderProfileViewersPage();
   if (state.myAdsOpen) html += renderMyAdsPage();
   if (state.moderationPanelOpen) html += renderModerationPage();
   if (state.publishMenu) html += renderPublishMenu();
@@ -9260,6 +9314,7 @@ function _renderImpl() {
   }
 
   if (state.followListFor) bindFollowListPage();
+  if (state.profileViewersFor) bindProfileViewersPage();
   if (state.myAdsOpen) bindMyAdsPage();
   if (state.moderationPanelOpen) bindModerationPage();
   if (state.publishMenu) bindPublishMenu();
@@ -16356,6 +16411,7 @@ function renderProfilePage(userId) {
           '<div><div class="profile-stat-num">'+fmtNum(postCount)+'</div><div class="profile-stat-label">posts</div></div>' +
           '<div data-open-followlist="'+userId+':followers" style="cursor:pointer;"><div class="profile-stat-num">'+fmtNum(typeof u.followerCountOverride === "number" ? u.followerCountOverride : (u.followers||[]).length)+'</div><div class="profile-stat-label">seguidores'+((u.hideFollowerCount && !isMe) ? ' <span style="display:inline-flex;vertical-align:-2px;">'+icoSvg("lock",11,"var(--muted)")+'</span>' : "")+'</div></div>' +
           '<div data-open-followlist="'+userId+':following" style="cursor:pointer;"><div class="profile-stat-num">'+fmtNum((u.following||[]).length)+'</div><div class="profile-stat-label">seguindo'+((u.hideFollowerCount && !isMe) ? ' <span style="display:inline-flex;vertical-align:-2px;">'+icoSvg("lock",11,"var(--muted)")+'</span>' : "")+'</div></div>' +
+          (isMe ? '<div class="profile-viewers-badge" data-open-profileviewers="'+userId+'" style="cursor:pointer;"><div class="profile-stat-num">'+fmtNum(u.profileViewCount||0)+'</div><div class="profile-stat-label">visitas</div></div>' : "") +
         '</div>' +
       '</div>' +
     '</div>' +
@@ -16532,6 +16588,13 @@ function bindProfilePage(userId) {
       state.followListFor = { userId:parts[0], kind:parts[1] };
       render();
     });
+  });
+
+  var openViewersBtn = appEl.querySelector("[data-open-profileviewers]");
+  if (openViewersBtn) openViewersBtn.addEventListener("click", function() {
+    var targetId = openViewersBtn.getAttribute("data-open-profileviewers");
+    state.profileViewersFor = targetId;
+    render();
   });
 
   var shareProfileBtn = appEl.querySelector("[data-share-profile]");
@@ -17430,6 +17493,86 @@ function bindFollowListPage() {
     btn.addEventListener("click", function(e) {
       e.stopPropagation();
       toggleFollow(btn.getAttribute("data-followlist-toggle"));
+      render();
+    });
+  });
+}
+
+// ─── QUEM VIU MEU PERFIL ────────────────────────────────────────
+// A lista de nomes é aberta pra qualquer um (free ou Plus); só a
+// quantidade de vezes que cada pessoa visitou fica trancada/borrada
+// pra quem não é assinante MIMI Plus. Segue o mesmo padrão de cache
+// "carrega uma vez, guarda em state" que storyViewsCache já usa.
+function renderProfileViewersPage() {
+  var ownerId = state.profileViewersFor;
+  var viewers = state.profileViewersCache[ownerId];
+  var isPlus = isSubscriptionActive(ME_obj());
+  var totalCount = (USERS[ownerId] || {}).profileViewCount || 0;
+
+  if (viewers == null) {
+    // dispara a busca uma única vez; quando resolver, guarda no cache e
+    // re-renderiza pra mostrar a lista (mesmo truque do renderStoryViewer)
+    if (typeof FB !== "undefined" && FB.getProfileViewers) {
+      FB.getProfileViewers(ownerId).then(function(list){
+        state.profileViewersCache[ownerId] = list || [];
+        render();
+      });
+    }
+    viewers = [];
+  }
+
+  var html = '<div class="create-overlay fade-in" style="z-index:220;">' +
+    '<div class="create-header">' +
+      '<button class="icon-btn" data-close-profileviewers style="color:var(--sub);">'+icoSvg("back",22)+'</button>' +
+      '<span style="font-weight:800;font-size:16px;">Quem viu seu perfil</span>' +
+      '<span style="width:22px;"></span>' +
+    '</div>' +
+    '<div class="create-body" style="padding:0;">';
+
+  if (!isPlus) {
+    html += '<div class="viewers-plus-banner" data-viewers-open-subs>' +
+      '<div class="vpb-ic">'+icoSvg("lock",15,"#fff")+'</div>' +
+      '<div class="vpb-txt"><b>Veja quantas vezes cada um visitou</b><span>Exclusivo do MIMI Plus</span></div>' +
+      '<div class="vpb-go">Assinar '+icoSvg("chevronRight",13,"var(--pink)")+'</div>' +
+    '</div>';
+  }
+
+  if (state.profileViewersCache[ownerId] == null) {
+    html += '<div class="search-empty">Carregando...</div>';
+  } else if (!viewers.length) {
+    html += '<div class="search-empty">Ainda ninguém visitou seu perfil.</div>';
+  } else {
+    viewers.forEach(function(v) {
+      var person = USERS[v.uid] || { name: v.name || "Usuário", username: v.username || "", avatar: v.avatar || "https://api.dicebear.com/7.x/avataaars/svg?seed="+v.uid, uid: v.uid };
+      html += '<div class="follow-row" data-viewerlist-person="'+v.uid+'">' + avatarHtml(person.avatar,46,false,false,false,null,null,getUserFrame(person)) +
+        '<div class="follow-row-info"><div class="follow-row-name">'+esc(person.name)+' '+userVerifiedBadge(person,17)+'</div>' +
+        '<div class="follow-row-username">'+esc(person.username)+'</div></div>' +
+        (isPlus
+          ? '<div style="text-align:right;flex-shrink:0;"><div class="profile-stat-num" style="font-size:14px;">'+fmtNum(v.count)+'</div><div class="profile-stat-label" style="font-size:10px;">visitas</div></div>'
+          : '<div class="viewer-count-locked" data-viewers-open-subs><span class="vc-num profile-stat-num" style="font-size:14px;">'+fmtNum(v.count)+'</span><span class="viewer-lock-ic">'+icoSvg("lock",9,"#fff")+'</span></div>') +
+      '</div>';
+    });
+  }
+
+  html += '</div></div>';
+  return html;
+}
+function bindProfileViewersPage() {
+  var closeBtn = appEl.querySelector("[data-close-profileviewers]");
+  if (closeBtn) closeBtn.addEventListener("click", function() { state.profileViewersFor = null; render(); });
+  appEl.querySelectorAll("[data-viewerlist-person]").forEach(function(row) {
+    row.addEventListener("click", function(e) {
+      if (e.target.closest("[data-viewers-open-subs]")) return;
+      var id = row.getAttribute("data-viewerlist-person");
+      state.profileViewersFor = null;
+      openProfile(id);
+    });
+  });
+  appEl.querySelectorAll("[data-viewers-open-subs]").forEach(function(el) {
+    el.addEventListener("click", function(e) {
+      e.stopPropagation();
+      state.profileViewersFor = null;
+      state.subsOpen = true;
       render();
     });
   });
