@@ -2127,6 +2127,102 @@ function adShowsIn(p, where) {
   return !!adPlacesOf(p)[where];
 }
 
+// ─────────────────────────────────────────────────────────────
+// 📢 Motor de entrega de anúncios (modelo tipo Instagram)
+//
+// Problema: antes TODO anúncio ativo entrava no feed, intercalado a cada
+// 4 posts, em rodízio circular. Com muitos anunciantes, o número de
+// anúncios crescia junto com eles e podia passar do número de posts
+// comuns. No Instagram a quantidade de anúncios NÃO depende de quantos
+// anunciantes existem: a densidade é fixa (1 anúncio a cada N posts) e o
+// que muda é QUAL anúncio ocupa o slot. Além disso, cada anúncio tem
+// limite de repetição por pessoa (frequency cap) e há rodízio justo
+// entre anunciantes.
+//
+// Regras implementadas:
+//  1. Densidade fixa: 1º anúncio só depois de AD_FIRST_SLOT posts e
+//     depois 1 a cada AD_EVERY posts.
+//  2. Teto absoluto: anúncios nunca passam de AD_MAX_RATIO do feed.
+//  3. Frequency cap: cada anúncio aparece no máximo
+//     AD_MAX_IMPRESSIONS_DAY vezes por dia para a mesma pessoa.
+//  4. Rodízio justo: escolhe sempre quem foi menos exibido / há mais
+//     tempo não aparece (e não repete o mesmo anunciante na mesma
+//     rolagem enquanto houver outros disponíveis).
+// ─────────────────────────────────────────────────────────────
+var AD_FIRST_SLOT = 4;          // primeiro anúncio só depois do 4º post
+var AD_EVERY = 6;               // depois, 1 anúncio a cada 6 posts
+var AD_MAX_RATIO = 0.2;         // no máximo 20% do feed é anúncio
+var AD_MAX_IMPRESSIONS_DAY = 3; // mesmo anúncio, no máx. 3x/dia por pessoa
+var AD_STATS_KEY = "mimi_ad_delivery_v1";
+
+function _adStatsToday() {
+  var today = new Date().toISOString().slice(0, 10);
+  var raw = null;
+  try { raw = JSON.parse(localStorage.getItem(AD_STATS_KEY) || "null"); } catch (e) { raw = null; }
+  if (!raw || raw.day !== today) raw = { day: today, ads: {} };
+  if (!raw.ads) raw.ads = {};
+  return raw;
+}
+function _adStatsSave(stats) {
+  try { localStorage.setItem(AD_STATS_KEY, JSON.stringify(stats)); } catch (e) {}
+}
+function adImpressionsToday(adId) {
+  var s = _adStatsToday().ads[adId];
+  return s ? (s.n || 0) : 0;
+}
+// Registrado quando o anúncio realmente entra numa lista renderizada.
+function noteAdImpression(adId) {
+  if (!adId) return;
+  var stats = _adStatsToday();
+  var cur = stats.ads[adId] || { n: 0, last: 0 };
+  cur.n = (cur.n || 0) + 1;
+  cur.last = Date.now();
+  stats.ads[adId] = cur;
+  _adStatsSave(stats);
+}
+function _adLastShown(adId) {
+  var s = _adStatsToday().ads[adId];
+  return s ? (s.last || 0) : 0;
+}
+
+// Fila de rodízio: menos exibidos primeiro, depois quem está há mais
+// tempo sem aparecer. Anúncios que já bateram o limite diário ficam no
+// fim (só entram se não sobrar mais ninguém).
+function adRotationQueue(where) {
+  var ads = adsForPlace(where).slice();
+  ads.sort(function(a, b) {
+    var ca = adImpressionsToday(a.id), cb = adImpressionsToday(b.id);
+    var capA = ca >= AD_MAX_IMPRESSIONS_DAY ? 1 : 0;
+    var capB = cb >= AD_MAX_IMPRESSIONS_DAY ? 1 : 0;
+    if (capA !== capB) return capA - capB;
+    if (ca !== cb) return ca - cb;
+    return _adLastShown(a.id) - _adLastShown(b.id);
+  });
+  return ads;
+}
+
+// Escolhe até "slots" anúncios, sem repetir anunciante enquanto houver
+// outros disponíveis e sem repetir o mesmo anúncio na mesma rolagem.
+function pickAdsForSlots(where, slots) {
+  if (slots <= 0) return [];
+  var queue = adRotationQueue(where);
+  if (!queue.length) return [];
+  var chosen = [], usedAds = {}, usedAuthors = {};
+  for (var pass = 0; pass < 2 && chosen.length < slots; pass++) {
+    for (var i = 0; i < queue.length && chosen.length < slots; i++) {
+      var ad = queue[i];
+      if (usedAds[ad.id]) continue;
+      // 1ª passada: no máximo um anúncio por anunciante.
+      if (pass === 0 && usedAuthors[ad.authorId]) continue;
+      usedAds[ad.id] = true;
+      usedAuthors[ad.authorId] = true;
+      chosen.push(ad);
+    }
+  }
+  chosen.forEach(function(ad) { noteAdImpression(ad.id); });
+  return chosen;
+}
+
 // 2.5 (algoritmo do Feed): mesma ideia das Vibes (_vibeEngagementScore),
 // adaptada ao que um post tem disponível — sem view/watch_time (isso só
 // é logado nas Vibes hoje), então o sinal aqui é curtida + fogo +
@@ -2191,18 +2287,21 @@ function getFeedOrder(list) {
   // sequência, mesmo que os dois tenham score alto.
   ordered = _diversifyByAuthor(ordered, function(p) { return p.authorId; }, 2, 6);
 
-  var adSlides = adsForPlace("feed");
-  if (!adSlides.length) return ordered;
+  // Densidade fixa de anúncios (não cresce com o número de anunciantes).
+  var slots = [];
+  for (var i = AD_FIRST_SLOT - 1; i < ordered.length; i += AD_EVERY) slots.push(i);
+  // Teto: anúncios nunca passam de AD_MAX_RATIO do feed exibido.
+  var maxAds = Math.floor(ordered.length * AD_MAX_RATIO);
+  if (slots.length > maxAds) slots = slots.slice(0, maxAds);
+  if (!slots.length) return ordered;
+  var chosenAds = pickAdsForSlots("feed", slots.length);
+  if (!chosenAds.length) return ordered;
+  var slotSet = {};
+  slots.slice(0, chosenAds.length).forEach(function(idx, k) { slotSet[idx] = chosenAds[k]; });
   var result = [];
-  var adCursor = 0;
   ordered.forEach(function(p, idx) {
     result.push(p);
-    var afterThird = idx === 2;                  // depois da 3ª publicação
-    var afterEvery4 = idx > 2 && (idx - 2) % 4 === 0;
-    if (afterThird || afterEvery4) {
-      result.push(adSlides[adCursor % adSlides.length]);
-      adCursor++;
-    }
+    if (slotSet[idx]) result.push(slotSet[idx]);
   });
   return result;
 }
@@ -9738,7 +9837,9 @@ function allStoriesList() {
   });
   // Anúncios marcados para "Stories" entram na barra como um story normal,
   // com o selo "Anúncio" embaixo do nome de usuário.
-  adsForPlace("stories").forEach(function(ad) {
+  // Stories: no máximo 1 anúncio na barra, escolhido por rodízio (antes
+  // entravam TODOS os anúncios ativos, um por anunciante).
+  pickAdsForSlots("stories", 1).forEach(function(ad) {
     list.push({ ownerId: ad.authorId, own:false, isAd:true, ad: ad, seenCount:0 });
   });
   return list;
