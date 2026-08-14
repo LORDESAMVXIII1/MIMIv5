@@ -7046,6 +7046,12 @@ var FB = {
     }
 
     setTimeout(function() {
+      // FIX (total e lista divergindo, ex: "2 visitas" no topo mas só 1
+      // visitante na lista): antes essas duas gravações rodavam em paralelo,
+      // cada uma com seu próprio retry — se uma travasse e a outra não, o
+      // total e a lista saíam de sincronia. Agora a gravação do total só
+      // roda DEPOIS que a do visitante confirmar sucesso, então elas nunca
+      // mais divergem (se a do visitante falhar, a do total é pulada).
       withOneRetryOnTimeout(function() {
         return fsGet("profileViews/" + profileOwnerId + "/viewers/" + viewerId).then(function(existing) {
           var count = (existing && existing.count) || 0;
@@ -7057,6 +7063,17 @@ var FB = {
             avatar: viewerInfo.avatar || ""
           });
         });
+      }).then(function() {
+        return withOneRetryOnTimeout(function() {
+          return fsGet("users/" + profileOwnerId).then(function(owner) {
+            var total = (owner && owner.profileViewCount) || 0;
+            return fsSet("users/" + profileOwnerId, { profileViewCount: total + 1 }, true);
+          });
+        }).catch(function(err){
+          var msg = (err && err.message) || String(err);
+          console.warn("⚠️ Não consegui atualizar profileViewCount de "+profileOwnerId+":", msg);
+          if (typeof showToast === "function") showToast("Erro (total): " + msg, false);
+        });
       }).catch(function(err){
         var msg = (err && err.message) || String(err);
         console.warn("⚠️ Não consegui gravar profileViews/"+profileOwnerId+"/viewers/"+viewerId+":", msg);
@@ -7064,17 +7081,6 @@ var FB = {
         // testar pelo celular não dá pra abrir o console do navegador.
         // Pode remover este showToast assim que confirmarmos a causa.
         if (typeof showToast === "function") showToast("Erro (visitante): " + msg, false);
-      });
-
-      withOneRetryOnTimeout(function() {
-        return fsGet("users/" + profileOwnerId).then(function(owner) {
-          var total = (owner && owner.profileViewCount) || 0;
-          return fsSet("users/" + profileOwnerId, { profileViewCount: total + 1 }, true);
-        });
-      }).catch(function(err){
-        var msg = (err && err.message) || String(err);
-        console.warn("⚠️ Não consegui atualizar profileViewCount de "+profileOwnerId+":", msg);
-        if (typeof showToast === "function") showToast("Erro (total): " + msg, false);
       });
     }, 1500);
 
