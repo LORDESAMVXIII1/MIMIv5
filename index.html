@@ -7063,6 +7063,13 @@ var FB = {
       // roda DEPOIS que a do visitante confirmar sucesso, então elas nunca
       // mais divergem (se a do visitante falhar, a do total é pulada).
       fsGet("profileViews/" + profileOwnerId + "/viewers/" + viewerId).then(function(existing) {
+        // isNewViewer: true só quando esse visitante ainda não tinha um
+        // documento em "viewers" (ou seja, é a 1ª visita dele a esse
+        // perfil). O total (profileViewCount) deve contar PERFIS
+        // distintos que visitaram, não o número de vezes que visitaram —
+        // então só incrementamos o total quando isNewViewer é true; em
+        // revisitas, só o "count" por-visitante sobe.
+        var isNewViewer = !existing;
         var viewerTarget = ((existing && existing.count) || 0) + 1;
         return withOneRetryOnTimeout(function() {
           return fsSet("profileViews/" + profileOwnerId + "/viewers/" + viewerId, {
@@ -7072,8 +7079,9 @@ var FB = {
             username: viewerInfo.username || "",
             avatar: viewerInfo.avatar || ""
           });
-        });
-      }).then(function() {
+        }).then(function() { return isNewViewer; });
+      }).then(function(isNewViewer) {
+        if (!isNewViewer) return; // já contado no total antes, não soma de novo
         return fsGet("users/" + profileOwnerId).then(function(owner) {
           var totalTarget = ((owner && owner.profileViewCount) || 0) + 1;
           return withOneRetryOnTimeout(function() {
@@ -17614,6 +17622,18 @@ function renderProfileViewersPage() {
     if (typeof FB !== "undefined" && FB.getProfileViewers) {
       FB.getProfileViewers(ownerId).then(function(list){
         state.profileViewersCache[ownerId] = list || [];
+        // AUTO-CORREÇÃO: profileViewCount deveria ser o número de perfis
+        // distintos que visitaram (= tamanho dessa lista), não o número de
+        // visitas somadas. Contas antigas (de antes desse fix) podem estar
+        // com o total acima do real (ex: "2 visitas" com só 1 pessoa na
+        // lista) — quando o dono abre essa tela, corrige o total pra bater
+        // com a lista de uma vez, sem precisar esperar uma nova visita.
+        var realTotal = (list || []).length;
+        var owner = USERS[ownerId];
+        if (owner && (owner.profileViewCount || 0) !== realTotal && typeof fsSet === "function") {
+          owner.profileViewCount = realTotal;
+          fsSet("users/" + ownerId, { profileViewCount: realTotal }, true).catch(function(){});
+        }
         render();
       });
     }
