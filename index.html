@@ -7024,32 +7024,59 @@ var FB = {
     var nowIso = new Date().toISOString();
     var viewerInfo = USERS[viewerId] || {};
 
-    fsGet("profileViews/" + profileOwnerId + "/viewers/" + viewerId).then(function(existing) {
-      var count = (existing && existing.count) || 0;
-      return fsSet("profileViews/" + profileOwnerId + "/viewers/" + viewerId, {
-        count: count + 1,
-        lastAt: nowIso,
-        name: viewerInfo.name || "Usuário",
-        username: viewerInfo.username || "",
-        avatar: viewerInfo.avatar || ""
+    // FIX (timeout intermitente deixando total e lista fora de sincronia):
+    // abrir um perfil já dispara sozinho várias dezenas de chamadas ao
+    // fs-gateway em paralelo (posts, stories, seguidores etc.) — em rajada,
+    // algumas passam de 8-9s pra responder. Como cada chamada tem um teto
+    // de 10s (fetchWithTimeout), bastava UMA das duas gravações abaixo (a
+    // do total ou a da lista) estourar esse teto nessa rajada inicial pra
+    // ficarem inconsistentes entre si (uma grava, a outra não). Atrasar as
+    // duas em 1,5s dá tempo da rajada inicial do openProfile esvaziar, e um
+    // retry único quando o erro for especificamente NETWORK_TIMEOUT cobre
+    // o que ainda cair numa rajada de outra hora. Mesmo trade-off aceito
+    // acima (não atômico): num retry, existe uma chance pequena de contar
+    // a mesma visita duas vezes se a 1ª tentativa tiver ido a diante no
+    // servidor mas a resposta não tiver chegado a tempo — aceitável no
+    // mesmo espírito de _bumpVibeEngagementAggregate.
+    function withOneRetryOnTimeout(fn) {
+      return fn().catch(function(err) {
+        if (err && err.code === "NETWORK_TIMEOUT") return fn();
+        throw err;
       });
-    }).catch(function(err){
-      var msg = (err && err.message) || String(err);
-      console.warn("⚠️ Não consegui gravar profileViews/"+profileOwnerId+"/viewers/"+viewerId+":", msg);
-      // DIAGNÓSTICO TEMPORÁRIO: mostra o erro na tela via toast, já que
-      // testar pelo celular não dá pra abrir o console do navegador.
-      // Pode remover este showToast assim que confirmarmos a causa.
-      if (typeof showToast === "function") showToast("Erro (visitante): " + msg, false);
-    });
+    }
 
-    fsGet("users/" + profileOwnerId).then(function(owner) {
-      var total = (owner && owner.profileViewCount) || 0;
-      return fsSet("users/" + profileOwnerId, { profileViewCount: total + 1 }, true);
-    }).catch(function(err){
-      var msg = (err && err.message) || String(err);
-      console.warn("⚠️ Não consegui atualizar profileViewCount de "+profileOwnerId+":", msg);
-      if (typeof showToast === "function") showToast("Erro (total): " + msg, false);
-    });
+    setTimeout(function() {
+      withOneRetryOnTimeout(function() {
+        return fsGet("profileViews/" + profileOwnerId + "/viewers/" + viewerId).then(function(existing) {
+          var count = (existing && existing.count) || 0;
+          return fsSet("profileViews/" + profileOwnerId + "/viewers/" + viewerId, {
+            count: count + 1,
+            lastAt: nowIso,
+            name: viewerInfo.name || "Usuário",
+            username: viewerInfo.username || "",
+            avatar: viewerInfo.avatar || ""
+          });
+        });
+      }).catch(function(err){
+        var msg = (err && err.message) || String(err);
+        console.warn("⚠️ Não consegui gravar profileViews/"+profileOwnerId+"/viewers/"+viewerId+":", msg);
+        // DIAGNÓSTICO TEMPORÁRIO: mostra o erro na tela via toast, já que
+        // testar pelo celular não dá pra abrir o console do navegador.
+        // Pode remover este showToast assim que confirmarmos a causa.
+        if (typeof showToast === "function") showToast("Erro (visitante): " + msg, false);
+      });
+
+      withOneRetryOnTimeout(function() {
+        return fsGet("users/" + profileOwnerId).then(function(owner) {
+          var total = (owner && owner.profileViewCount) || 0;
+          return fsSet("users/" + profileOwnerId, { profileViewCount: total + 1 }, true);
+        });
+      }).catch(function(err){
+        var msg = (err && err.message) || String(err);
+        console.warn("⚠️ Não consegui atualizar profileViewCount de "+profileOwnerId+":", msg);
+        if (typeof showToast === "function") showToast("Erro (total): " + msg, false);
+      });
+    }, 1500);
 
     return fsSet("notifications/" + profileOwnerId + "/items/" + uid(), {
       type: "profileView",
