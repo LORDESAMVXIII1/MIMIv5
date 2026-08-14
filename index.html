@@ -7038,6 +7038,16 @@ var FB = {
     // a mesma visita duas vezes se a 1ª tentativa tiver ido a diante no
     // servidor mas a resposta não tiver chegado a tempo — aceitável no
     // mesmo espírito de _bumpVibeEngagementAggregate.
+    // FIX (contagem duplicada no retry): o retry acima refazia LEITURA +
+    // ESCRITA juntas. Se a 1ª tentativa desse certo no servidor mas a
+    // resposta demorasse além do teto de 10s (fetchWithTimeout), o cliente
+    // via isso como timeout e tentava de novo — só que a releitura já pegava
+    // o valor recém-incrementado e somava +1 em cima, contando a mesma
+    // visita duas vezes (é o que causava "2 visitas" no total com só 1
+    // pessoa/1 visita real na lista). Agora cada escrita LÊ o valor atual
+    // uma única vez, fora do retry, e o retry reenvia sempre o MESMO valor
+    // alvo já calculado — reenviar o mesmo valor é seguro mesmo que a 1ª
+    // tentativa já tenha ido a diante no servidor.
     function withOneRetryOnTimeout(fn) {
       return fn().catch(function(err) {
         if (err && err.code === "NETWORK_TIMEOUT") return fn();
@@ -7052,11 +7062,11 @@ var FB = {
       // total e a lista saíam de sincronia. Agora a gravação do total só
       // roda DEPOIS que a do visitante confirmar sucesso, então elas nunca
       // mais divergem (se a do visitante falhar, a do total é pulada).
-      withOneRetryOnTimeout(function() {
-        return fsGet("profileViews/" + profileOwnerId + "/viewers/" + viewerId).then(function(existing) {
-          var count = (existing && existing.count) || 0;
+      fsGet("profileViews/" + profileOwnerId + "/viewers/" + viewerId).then(function(existing) {
+        var viewerTarget = ((existing && existing.count) || 0) + 1;
+        return withOneRetryOnTimeout(function() {
           return fsSet("profileViews/" + profileOwnerId + "/viewers/" + viewerId, {
-            count: count + 1,
+            count: viewerTarget,
             lastAt: nowIso,
             name: viewerInfo.name || "Usuário",
             username: viewerInfo.username || "",
@@ -7064,10 +7074,10 @@ var FB = {
           });
         });
       }).then(function() {
-        return withOneRetryOnTimeout(function() {
-          return fsGet("users/" + profileOwnerId).then(function(owner) {
-            var total = (owner && owner.profileViewCount) || 0;
-            return fsSet("users/" + profileOwnerId, { profileViewCount: total + 1 }, true);
+        return fsGet("users/" + profileOwnerId).then(function(owner) {
+          var totalTarget = ((owner && owner.profileViewCount) || 0) + 1;
+          return withOneRetryOnTimeout(function() {
+            return fsSet("users/" + profileOwnerId, { profileViewCount: totalTarget }, true);
           });
         }).catch(function(err){
           var msg = (err && err.message) || String(err);
