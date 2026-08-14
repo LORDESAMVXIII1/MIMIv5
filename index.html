@@ -7033,12 +7033,16 @@ var FB = {
         username: viewerInfo.username || "",
         avatar: viewerInfo.avatar || ""
       });
-    }).catch(function(){});
+    }).catch(function(err){
+      console.warn("⚠️ Não consegui gravar profileViews/"+profileOwnerId+"/viewers/"+viewerId+":", err && err.message || err);
+    });
 
     fsGet("users/" + profileOwnerId).then(function(owner) {
       var total = (owner && owner.profileViewCount) || 0;
       return fsSet("users/" + profileOwnerId, { profileViewCount: total + 1 }, true);
-    }).catch(function(){});
+    }).catch(function(err){
+      console.warn("⚠️ Não consegui atualizar profileViewCount de "+profileOwnerId+":", err && err.message || err);
+    });
 
     return fsSet("notifications/" + profileOwnerId + "/items/" + uid(), {
       type: "profileView",
@@ -7060,7 +7064,10 @@ var FB = {
       return (docs||[]).map(function(d){
         return { uid: d._id, count: d.count || 1, lastAt: d.lastAt, name: d.name, username: d.username, avatar: d.avatar };
       }).sort(function(a,b){ return (b.lastAt||"").localeCompare(a.lastAt||""); });
-    }).catch(function(){ return []; });
+    }).catch(function(err){
+      console.warn("⚠️ Não consegui listar profileViews/"+profileOwnerId+"/viewers:", err && err.message || err);
+      return [];
+    });
   }
 };
 
