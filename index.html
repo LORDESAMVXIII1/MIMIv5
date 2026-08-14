@@ -7100,7 +7100,18 @@ var FB = {
   // outro usuário). Ordenado pela visita mais recente primeiro.
   getProfileViewers: function(profileOwnerId) {
     if (!_idToken) return Promise.resolve([]);
-    return fsList("profileViews/" + profileOwnerId + "/viewers").then(function(docs){
+    // FIX (tela piscava e mostrava "ainda ninguém visitou" + erro de timeout
+    // em rede lenta): um único timeout aqui não tinha retry, diferente do
+    // padrão usado em recordProfileView — em rede lenta a primeira tentativa
+    // falhava direto pro estado vazio. Agora tenta de novo uma vez antes de
+    // desistir, igual ao resto do código.
+    function fetchViewers() {
+      return fsList("profileViews/" + profileOwnerId + "/viewers");
+    }
+    return fetchViewers().catch(function(err){
+      if (err && err.code === "NETWORK_TIMEOUT") return fetchViewers();
+      throw err;
+    }).then(function(docs){
       return (docs||[]).map(function(d){
         return { uid: d._id, count: d.count || 1, lastAt: d.lastAt, name: d.name, username: d.username, avatar: d.avatar };
       }).sort(function(a,b){ return (b.lastAt||"").localeCompare(a.lastAt||""); });
