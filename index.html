@@ -7034,14 +7034,21 @@ var FB = {
         avatar: viewerInfo.avatar || ""
       });
     }).catch(function(err){
-      console.warn("⚠️ Não consegui gravar profileViews/"+profileOwnerId+"/viewers/"+viewerId+":", err && err.message || err);
+      var msg = (err && err.message) || String(err);
+      console.warn("⚠️ Não consegui gravar profileViews/"+profileOwnerId+"/viewers/"+viewerId+":", msg);
+      // DIAGNÓSTICO TEMPORÁRIO: mostra o erro na tela via toast, já que
+      // testar pelo celular não dá pra abrir o console do navegador.
+      // Pode remover este showToast assim que confirmarmos a causa.
+      if (typeof showToast === "function") showToast("Erro (visitante): " + msg, false);
     });
 
     fsGet("users/" + profileOwnerId).then(function(owner) {
       var total = (owner && owner.profileViewCount) || 0;
       return fsSet("users/" + profileOwnerId, { profileViewCount: total + 1 }, true);
     }).catch(function(err){
-      console.warn("⚠️ Não consegui atualizar profileViewCount de "+profileOwnerId+":", err && err.message || err);
+      var msg = (err && err.message) || String(err);
+      console.warn("⚠️ Não consegui atualizar profileViewCount de "+profileOwnerId+":", msg);
+      if (typeof showToast === "function") showToast("Erro (total): " + msg, false);
     });
 
     return fsSet("notifications/" + profileOwnerId + "/items/" + uid(), {
@@ -7065,7 +7072,9 @@ var FB = {
         return { uid: d._id, count: d.count || 1, lastAt: d.lastAt, name: d.name, username: d.username, avatar: d.avatar };
       }).sort(function(a,b){ return (b.lastAt||"").localeCompare(a.lastAt||""); });
     }).catch(function(err){
-      console.warn("⚠️ Não consegui listar profileViews/"+profileOwnerId+"/viewers:", err && err.message || err);
+      var msg = (err && err.message) || String(err);
+      console.warn("⚠️ Não consegui listar profileViews/"+profileOwnerId+"/viewers:", msg);
+      if (typeof showToast === "function") showToast("Erro (lista): " + msg, false);
       return [];
     });
   }
