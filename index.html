@@ -7198,15 +7198,17 @@ var FB = {
         }).catch(function(err){
           var msg = (err && err.message) || String(err);
           console.warn("⚠️ Não consegui atualizar profileViewCount de "+profileOwnerId+":", msg);
-          if (typeof showToast === "function") showToast("Erro (total): " + msg, false);
         });
       }).catch(function(err){
         var msg = (err && err.message) || String(err);
         console.warn("⚠️ Não consegui gravar profileViews/"+profileOwnerId+"/viewers/"+viewerId+":", msg);
-        // DIAGNÓSTICO TEMPORÁRIO: mostra o erro na tela via toast, já que
-        // testar pelo celular não dá pra abrir o console do navegador.
-        // Pode remover este showToast assim que confirmarmos a causa.
-        if (typeof showToast === "function") showToast("Erro (visitante): " + msg, false);
+        // FIX: os dois showToast de diagnóstico ("Erro (total)"/"Erro
+        // (visitante)") eram temporários pra confirmar a causa de uma
+        // divergência antiga — causa já confirmada (timeout em rede lenta,
+        // com retry automático cobrindo a maioria dos casos). Deixavam
+        // vazar um erro técnico pra tela de QUALQUER visitante de perfil,
+        // mesmo sem relação com o que ele estava fazendo. Retirados; o
+        // console.warn acima continua registrando pra debug.
       });
     }, 1500);
 
@@ -17795,6 +17797,14 @@ function renderProfileViewersPage() {
         if (bodyEl) {
           bodyEl.innerHTML = renderProfileViewersBody(ownerId);
           bindProfileViewersBody(bodyEl);
+          // FIX (avatar quebrado na lista, ex: MIMI OFICIAL): essa
+          // atualização troca só o HTML interno pra evitar o piscar da
+          // tela (ver comentário ANTI-PISCADA acima), mas isso pula o
+          // hydrateImages() que o render() completo chama sozinho depois.
+          // Avatares novos (formato ImageKit) ficam com data-imgpath e
+          // src="" até essa função rodar e buscar a URL assinada — sem
+          // ela, o navegador mostra o ícone de imagem quebrada.
+          if (typeof hydrateImages === "function") hydrateImages(bodyEl);
         } else {
           render();
         }
