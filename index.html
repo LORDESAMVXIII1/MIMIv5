@@ -7552,6 +7552,22 @@ function backgroundRender() {
   // marcamos como pendente e aplicamos o render assim que a tela for
   // fechada.
   if (state.profileViewersFor) { _pendingBackgroundRender = true; return; }
+  // FIX: mesmo motivo do Feed/Vibes acima — a aba "posts"/"músicas" do
+  // perfil (o próprio, ou o de outra pessoa aberto por cima via
+  // state.viewProfileId) usa os MESMOS players de vídeo (posts normais E
+  // prévias de Vibe, ambas com autoplay). Sem esta guarda, qualquer poll
+  // de fundo (notificações, stories, reações, presença, lista de
+  // conversas) reconstruía appEl.innerHTML inteiro a cada 10-20s — isso
+  // destruía e recriava os <video> antes deles conseguirem sequer
+  // terminar de carregar o primeiro quadro, então na prática NUNCA
+  // chegavam a tocar (ficavam pretos pra sempre, reiniciando do zero
+  // repetidamente). Os dados continuam atualizados nas listas locais; a
+  // tela só é reconstruída de fato quando a pessoa trocar de aba/sair do
+  // perfil.
+  if ((state.page === "profile" || state.viewProfileId) &&
+      (profileTab === "posts" || profileTab === "músicas")) {
+    _pendingBackgroundRender = true; return;
+  }
   render();
 }
 
