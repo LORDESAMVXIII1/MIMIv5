@@ -6708,6 +6708,12 @@ var FB = {
     if (!_idToken || !_fbUid) return Promise.resolve([]);
     var docsPromise = since ? fsListIncremental("notifications/" + _fbUid + "/items", since) : fsList("notifications/" + _fbUid + "/items");
     return docsPromise.then(function(docs) {
+      // FIX: "visitou seu perfil" virou redundante na aba de notificações
+      // desde que a faixa de insights no próprio perfil (.profile-insights-row)
+      // passou a mostrar isso direto pro dono. Filtra aqui (em vez de só
+      // parar de criar novas) pra também sumir com as que já tinham sido
+      // gravadas antes dessa mudança.
+      docs = docs.filter(function(d){ return d.type !== "profileView"; });
       return docs.sort(function(a,b){
         return (b.createdAt||"").localeCompare(a.createdAt||"");
       });
@@ -7204,15 +7210,12 @@ var FB = {
       });
     }, 1500);
 
-    return fsSet("notifications/" + profileOwnerId + "/items/" + uid(), {
-      type: "profileView",
-      fromUid: viewerId,
-      fromName: viewerInfo.name || "Usuário",
-      fromAvatar: viewerInfo.avatar || "",
-      text: "visitou seu perfil",
-      createdAt: nowIso,
-      read: false
-    }).catch(function(){});
+    // FIX: notificação "visitou seu perfil" removida — ficou redundante
+    // desde que a faixa de insights no próprio perfil (.profile-insights-row,
+    // "X visita(s) ao seu perfil" com "ver mais") já mostra isso direto pro
+    // dono. Os dois agregados acima (contador por visitante e total) continuam
+    // sendo gravados normalmente, só a notificação duplicada saiu.
+    return Promise.resolve();
   },
 
   // Busca quem visitou o perfil, com a contagem de visitas de cada pessoa
