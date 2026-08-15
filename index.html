@@ -22029,6 +22029,48 @@ render = function() {
     }
   }
 
+  // Busca só os dados da aba atual, sem recarregar o app inteiro. Cada
+  // entrada devolve uma Promise. Abas sem entrada aqui (perfil,
+  // configurações etc.) caem no reload completo de página, que continua
+  // sendo o fallback seguro.
+  var TAB_REFRESHERS = {
+    feed: function() {
+      return new Promise(function(resolve) {
+        loadPostsWithRetryAndRerender(resolve);
+        // loadPostsWithRetryAndRerender já tem seu próprio retry/loading;
+        // não deixa o indicador do puxão preso esperando por ele.
+        setTimeout(resolve, 3000);
+      });
+    },
+    vibes: function() {
+      if (typeof VibesModule !== "undefined" && VibesModule.loadUserVibes) {
+        VibesModule.loadUserVibes();
+      }
+      return Promise.resolve();
+    },
+    notifs: function() {
+      if (typeof FB !== "undefined" && FB.loadNotifs) {
+        return FB.loadNotifs().then(function(){ if (typeof renderSoon === "function") renderSoon(); else if (typeof render === "function") render(); });
+      }
+      return Promise.resolve();
+    }
+  };
+
+  function finishRefresh() {
+    refreshing = false;
+    resetIndicator(true);
+  }
+
+  function fullPageReload() {
+    try {
+      var url = new URL(location.href);
+      url.searchParams.set("_r", Date.now().toString());
+      location.href = url.toString();
+    } catch (e) {
+      location.reload();
+    }
+  }
+
   function triggerRefresh() {
     refreshing = true;
     if (!indicator) buildIndicator();
@@ -22038,14 +22080,14 @@ render = function() {
     indicator.classList.add("ptr-ready");
     iconWrap.style.transform = "";
     iconWrap.classList.add("ptr-spin");
+
+    var currentPage = (typeof state !== "undefined" && state) ? state.page : null;
+    var refresher = TAB_REFRESHERS[currentPage];
+
     setTimeout(function() {
-      try {
-        var url = new URL(location.href);
-        url.searchParams.set("_r", Date.now().toString());
-        location.href = url.toString();
-      } catch (e) {
-        location.reload();
-      }
+      if (!refresher) { fullPageReload(); return; }
+      // Só atualiza os dados daquela aba — sem recarregar o app inteiro.
+      Promise.resolve(refresher()).then(finishRefresh).catch(finishRefresh);
     }, 450);
   }
 
