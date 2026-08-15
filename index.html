@@ -11346,35 +11346,60 @@ function renderVibeProfileCard(v) {
       '<span class="post-sub" style="display:flex;align-items:center;gap:4px;">'+icoSvg("video",14,"var(--muted)")+' Vibe</span>' +
     '</div>' +
     (v.text ? '<p class="post-text">'+esc(v.text)+'</p>' : "") +
-    // FIX (tamanho inconsistente): essa caixa tinha um aspect-ratio fixo
-    // 9/16 com max-height:70vh (quase a tela inteira), bem maior que a
-    // caixa padrão de vídeo de post (.advanced-player: 16/9, max-height
-    // 78vh, que é o tamanho que aparece tanto no Feed quanto nos posts
-    // normais aqui na aba). Reaproveitando a mesma classe, toda a aba
-    // Posts passa a ter a mesma "moldura" de vídeo, esteja ele vindo de
-    // um post normal ou de uma Vibe — o vídeo vertical só é cortado
-    // (object-fit:cover) pra caber, em vez de esticar a caixa toda.
-    '<div class="advanced-player" data-vibe-preview="'+v.id+'">' +
-      '<video src="'+esc(v.video)+'" muted loop autoplay preload="auto" playsinline style="width:100%;height:100%;object-fit:cover;display:block;"></video>' +
+    // FIX (travamento + sem áudio ao rolar): antes TODA prévia de Vibe da
+    // lista tocava sozinha, ao mesmo tempo, sem parar — com várias vibes
+    // isso significava decodificar vários vídeos em paralelo, travando a
+    // rolagem, e nenhuma delas nunca "ganhava" o som porque nada as
+    // coordenava. Agora essa prévia entra no MESMO coordenador de vídeo
+    // único do Feed/posts (bindProfileVibePreviews registra ela no
+    // observer compartilhado) — só a mais visível toca (com som, se
+    // ligado), as outras ficam pausadas. Sem "autoplay" fixo no HTML: quem
+    // decide se/quando toca é o coordenador, baseado em visibilidade real.
+    '<div class="advanced-player" data-vibe-preview-wrap="'+v.id+'">' +
+      '<video id="vibePreviewVideo-'+v.id+'" src="'+esc(optimizeCloudinaryVideoUrl(v.video))+'" muted loop preload="metadata" playsinline style="width:100%;height:100%;object-fit:cover;display:block;"></video>' +
     '</div>' +
     '<div class="post-actions">' +
       '<span class="act-btn" style="pointer-events:none;">'+cuteFaceSvg(24,liked?C.pink:"var(--sub)",liked)+' '+fmtNum((v.likedBy||[]).length)+'</span>' +
     '</div>' +
   '</div>';
 }
-// Reforço em JS pra tocar as prévias de Vibe da aba Posts. O atributo
-// "autoplay" do HTML já cobre a maioria dos casos (mesmo padrão usado no
-// vídeo de capa e nos anúncios do app), mas alguns WebView/navegadores só
-// respeitam autoplay de forma confiável depois de o elemento estar de
-// fato anexado e visível — chamar .play() explicitamente aqui garante que
-// nenhuma prévia fique parada esperando o toque.
+// Registra cada prévia de Vibe da aba Posts no MESMO coordenador de vídeo
+// único do Feed/posts (_feedPlayersById/_feedVideoRatios + observer
+// compartilhado), em vez de cada uma tocar sozinha e sem parar. Assim só a
+// prévia mais visível toca (com som, se a preferência global estiver
+// ligada) e as outras ficam pausadas — evita decodificar vários vídeos ao
+// mesmo tempo (o que travava a rolagem) e faz o som funcionar igual aos
+// posts normais.
+var _activeVibePreviews = [];
 function bindProfileVibePreviews(root) {
-  (root || appEl).querySelectorAll('[data-vibe-preview] video').forEach(function(v) {
-    if (v.paused) {
-      var p = v.play();
-      if (p && p.catch) p.catch(function(){});
+  // Limpa os registros da render anterior antes de criar os novos, senão
+  // ficam entradas "presas" apontando pra elementos já removidos da tela
+  // (mesmo motivo do destroy() do AdvancedVideoPlayer).
+  _activeVibePreviews.forEach(function(pid) {
+    if (_feedSharedObserver) {
+      var wrap = appEl.querySelector('[data-vibe-preview-wrap="'+pid+'"]');
+      if (wrap) _feedSharedObserver.unobserve(wrap);
     }
+    delete _feedPlayersById[pid];
+    delete _feedVideoRatios[pid];
+    if (_feedActiveVideoId === pid) _feedActiveVideoId = null;
   });
+  _activeVibePreviews = [];
+
+  (root || appEl).querySelectorAll('[data-vibe-preview-wrap]').forEach(function(wrap) {
+    var vibeId = wrap.getAttribute('data-vibe-preview-wrap');
+    var pid = "vibe-" + vibeId; // prefixo evita colidir com o id de um post de verdade
+    var video = document.getElementById('vibePreviewVideo-' + vibeId);
+    if (!video) return;
+    video.muted = true; // eleição decide quando desmutar; nunca começa com som por conta própria
+    _feedPlayersById[pid] = { video: video };
+    _feedVideoRatios[pid] = 0;
+    wrap.setAttribute('data-feed-video-postid', pid);
+    var observer = getFeedSharedObserver();
+    if (observer) observer.observe(wrap);
+    _activeVibePreviews.push(pid);
+  });
+  electActiveFeedVideo();
 }
 // Abre a aba Vibes já na vibe específica que a pessoa tocou no perfil,
 // em vez de simplesmente cair no topo da lista.
