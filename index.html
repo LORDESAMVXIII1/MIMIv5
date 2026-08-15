@@ -17717,43 +17717,10 @@ function bindFollowListPage() {
 // quantidade de vezes que cada pessoa visitou fica trancada/borrada
 // pra quem não é assinante MIMI Plus. Segue o mesmo padrão de cache
 // "carrega uma vez, guarda em state" que storyViewsCache já usa.
-function renderProfileViewersPage() {
-  var ownerId = state.profileViewersFor;
+function renderProfileViewersBody(ownerId) {
   var viewers = state.profileViewersCache[ownerId];
   var isPlus = isSubscriptionActive(ME_obj());
-  var totalCount = (USERS[ownerId] || {}).profileViewCount || 0;
-
-  if (viewers == null) {
-    // dispara a busca uma única vez; quando resolver, guarda no cache e
-    // re-renderiza pra mostrar a lista (mesmo truque do renderStoryViewer)
-    if (typeof FB !== "undefined" && FB.getProfileViewers) {
-      FB.getProfileViewers(ownerId).then(function(list){
-        state.profileViewersCache[ownerId] = list || [];
-        // AUTO-CORREÇÃO: profileViewCount deveria ser o número de perfis
-        // distintos que visitaram (= tamanho dessa lista), não o número de
-        // visitas somadas. Contas antigas (de antes desse fix) podem estar
-        // com o total acima do real (ex: "2 visitas" com só 1 pessoa na
-        // lista) — quando o dono abre essa tela, corrige o total pra bater
-        // com a lista de uma vez, sem precisar esperar uma nova visita.
-        var realTotal = (list || []).length;
-        var owner = USERS[ownerId];
-        if (owner && (owner.profileViewCount || 0) !== realTotal && typeof fsSet === "function") {
-          owner.profileViewCount = realTotal;
-          fsSet("users/" + ownerId, { profileViewCount: realTotal }, true).catch(function(){});
-        }
-        render();
-      });
-    }
-    viewers = [];
-  }
-
-  var html = '<div class="create-overlay fade-in" style="z-index:220;">' +
-    '<div class="create-header">' +
-      '<button class="icon-btn" data-close-profileviewers style="color:var(--sub);">'+icoSvg("back",22)+'</button>' +
-      '<span style="font-weight:800;font-size:16px;">Quem viu seu perfil</span>' +
-      '<span style="width:22px;"></span>' +
-    '</div>' +
-    '<div class="create-body" style="padding:0;">';
+  var html = "";
 
   if (!isPlus) {
     html += '<div class="viewers-plus-banner" data-viewers-open-subs>' +
@@ -17763,7 +17730,7 @@ function renderProfileViewersPage() {
     '</div>';
   }
 
-  if (state.profileViewersCache[ownerId] == null) {
+  if (viewers == null) {
     html += '<div class="search-empty">Carregando...</div>';
   } else if (!viewers.length) {
     html += '<div class="search-empty">Ainda ninguém visitou seu perfil.</div>';
@@ -17780,13 +17747,62 @@ function renderProfileViewersPage() {
     });
   }
 
-  html += '</div></div>';
   return html;
 }
-function bindProfileViewersPage() {
-  var closeBtn = appEl.querySelector("[data-close-profileviewers]");
-  if (closeBtn) closeBtn.addEventListener("click", function() { state.profileViewersFor = null; render(); });
-  appEl.querySelectorAll("[data-viewerlist-person]").forEach(function(row) {
+function renderProfileViewersPage() {
+  var ownerId = state.profileViewersFor;
+  var viewers = state.profileViewersCache[ownerId];
+
+  if (viewers == null) {
+    // dispara a busca uma única vez; quando resolver, guarda no cache e
+    // atualiza a tela (mesmo truque do renderStoryViewer)
+    if (typeof FB !== "undefined" && FB.getProfileViewers) {
+      FB.getProfileViewers(ownerId).then(function(list){
+        state.profileViewersCache[ownerId] = list || [];
+        // AUTO-CORREÇÃO: profileViewCount deveria ser o número de perfis
+        // distintos que visitaram (= tamanho dessa lista), não o número de
+        // visitas somadas. Contas antigas (de antes desse fix) podem estar
+        // com o total acima do real (ex: "2 visitas" com só 1 pessoa na
+        // lista) — quando o dono abre essa tela, corrige o total pra bater
+        // com a lista de uma vez, sem precisar esperar uma nova visita.
+        var realTotal = (list || []).length;
+        var owner = USERS[ownerId];
+        if (owner && (owner.profileViewCount || 0) !== realTotal && typeof fsSet === "function") {
+          owner.profileViewCount = realTotal;
+          fsSet("users/" + ownerId, { profileViewCount: realTotal }, true).catch(function(){});
+        }
+        // ANTI-PISCADA: um render() completo aqui recriaria o app inteiro
+        // (appEl.innerHTML = html) só pra trocar "Carregando..." pela
+        // lista, e como o HTML muda, a proteção de "nada mudou" não evita
+        // o rebuild — a tela inteira pisca. Se essa tela ainda está aberta
+        // para o mesmo dono, atualiza só o corpo dela diretamente no DOM;
+        // se o usuário já saiu daqui, não faz nada (o próximo render
+        // normal já reflete o estado certo).
+        var bodyEl = state.profileViewersFor === ownerId && appEl
+          ? appEl.querySelector('[data-viewers-body="'+ownerId+'"]') : null;
+        if (bodyEl) {
+          bodyEl.innerHTML = renderProfileViewersBody(ownerId);
+          bindProfileViewersBody(bodyEl);
+        } else {
+          render();
+        }
+      });
+    }
+  }
+
+  var html = '<div class="create-overlay fade-in" style="z-index:220;">' +
+    '<div class="create-header">' +
+      '<button class="icon-btn" data-close-profileviewers style="color:var(--sub);">'+icoSvg("back",22)+'</button>' +
+      '<span style="font-weight:800;font-size:16px;">Quem viu seu perfil</span>' +
+      '<span style="width:22px;"></span>' +
+    '</div>' +
+    '<div class="create-body" data-viewers-body="'+ownerId+'" style="padding:0;">' +
+    renderProfileViewersBody(ownerId) +
+    '</div></div>';
+  return html;
+}
+function bindProfileViewersBody(container) {
+  container.querySelectorAll("[data-viewerlist-person]").forEach(function(row) {
     row.addEventListener("click", function(e) {
       if (e.target.closest("[data-viewers-open-subs]")) return;
       var id = row.getAttribute("data-viewerlist-person");
@@ -17794,7 +17810,7 @@ function bindProfileViewersPage() {
       openProfile(id);
     });
   });
-  appEl.querySelectorAll("[data-viewers-open-subs]").forEach(function(el) {
+  container.querySelectorAll("[data-viewers-open-subs]").forEach(function(el) {
     el.addEventListener("click", function(e) {
       e.stopPropagation();
       state.profileViewersFor = null;
@@ -17802,6 +17818,12 @@ function bindProfileViewersPage() {
       render();
     });
   });
+}
+function bindProfileViewersPage() {
+  var closeBtn = appEl.querySelector("[data-close-profileviewers]");
+  if (closeBtn) closeBtn.addEventListener("click", function() { state.profileViewersFor = null; render(); });
+  var bodyEl = appEl.querySelector("[data-viewers-body]");
+  if (bodyEl) bindProfileViewersBody(bodyEl);
 }
 
 // ─── EDIT PROFILE ──────────────────────────────────────────────
