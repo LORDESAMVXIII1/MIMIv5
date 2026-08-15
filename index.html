@@ -7538,6 +7538,15 @@ function backgroundRender() {
   // pausar ou terminar.
   if (_chatAudioPlayingId) { _pendingBackgroundRender = true; return; }
   if (mediaRecorder && mediaRecorder.state === "recording") { _pendingBackgroundRender = true; return; }
+  // FIX: a tela "Quem viu seu perfil" já atualiza o próprio conteúdo sozinha
+  // quando a lista termina de carregar (sem passar por render()), mas
+  // enquanto ela está aberta, qualquer OUTRO poll de fundo (notificações,
+  // stories, reações, presença) ainda chamava esse render() geral e
+  // reconstruía appEl.innerHTML inteiro por baixo dela — mesma causa dos
+  // outros casos acima ("piscar" mesmo sem nenhuma ação do usuário). Só
+  // marcamos como pendente e aplicamos o render assim que a tela for
+  // fechada.
+  if (state.profileViewersFor) { _pendingBackgroundRender = true; return; }
   render();
 }
 
