@@ -1029,6 +1029,10 @@
   .profile-stats { display:flex; gap:24px; }
   .profile-stat-num { font-weight:800; font-size:17px; }
   .profile-stat-label { font-size:12px; color:var(--muted); }
+  .profile-insights-row { display:flex; align-items:center; justify-content:space-between; margin-top:12px; padding:12px 14px; border-radius:14px; background:linear-gradient(90deg, color-mix(in srgb, var(--accent) 14%, transparent), color-mix(in srgb, var(--pink) 12%, transparent)); border:1px solid var(--border); cursor:pointer; }
+  .profile-insights-left { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text); }
+  .profile-insights-left svg { flex-shrink:0; }
+  .profile-insights-right { display:flex; align-items:center; gap:2px; color:var(--sub); font-size:12px; }
   .profile-tabs { display:flex; border-bottom:1px solid var(--border); background:var(--bg); position:sticky; top:0; z-index:5; }
   .profile-tab { flex:1; padding:13px 4px; border:none; background:none; cursor:pointer; color:var(--muted); font-weight:500; font-size:13px; border-bottom:2px solid transparent; text-transform:capitalize; }
   .profile-tab.active { color:var(--accent); font-weight:700; border-bottom:2px solid var(--accent); }
@@ -1365,7 +1369,6 @@
   .follow-btn.not-following { background:linear-gradient(135deg,var(--accent),var(--accentL)); color:#fff; }
 
   /* ── Visualizações de perfil (quem viu) ──────────────────── */
-  .profile-viewers-badge { display:flex; align-items:center; gap:4px; }
   .viewer-count-locked { display:inline-flex; align-items:center; gap:4px; }
   .viewer-count-locked .vc-num { filter:blur(3.5px); user-select:none; -webkit-user-select:none; }
   .viewer-lock-ic { width:16px; height:16px; border-radius:50%; background:linear-gradient(135deg,var(--accent),var(--accentL)); display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; }
@@ -16616,8 +16619,11 @@ function renderProfilePage(userId) {
           '<div><div class="profile-stat-num">'+fmtNum(postCount)+'</div><div class="profile-stat-label">posts</div></div>' +
           '<div data-open-followlist="'+userId+':followers" style="cursor:pointer;"><div class="profile-stat-num">'+fmtNum(typeof u.followerCountOverride === "number" ? u.followerCountOverride : (u.followers||[]).length)+'</div><div class="profile-stat-label">seguidores'+((u.hideFollowerCount && !isMe) ? ' <span style="display:inline-flex;vertical-align:-2px;">'+icoSvg("lock",11,"var(--muted)")+'</span>' : "")+'</div></div>' +
           '<div data-open-followlist="'+userId+':following" style="cursor:pointer;"><div class="profile-stat-num">'+fmtNum((u.following||[]).length)+'</div><div class="profile-stat-label">seguindo'+((u.hideFollowerCount && !isMe) ? ' <span style="display:inline-flex;vertical-align:-2px;">'+icoSvg("lock",11,"var(--muted)")+'</span>' : "")+'</div></div>' +
-          (isMe ? '<div class="profile-viewers-badge" data-open-profileviewers="'+userId+'" style="cursor:pointer;"><div class="profile-stat-num">'+fmtNum(u.profileViewCount||0)+'</div><div class="profile-stat-label">visitas</div></div>' : "") +
         '</div>' +
+        (isMe ? '<div class="profile-insights-row" data-open-profileviewers="'+userId+'">' +
+          '<div class="profile-insights-left">'+icoSvg("eye",16,"var(--pink)")+'<span>'+fmtNum(u.profileViewCount||0)+' '+((u.profileViewCount||0) === 1 ? "visita ao seu perfil" : "visitas ao seu perfil")+'</span></div>' +
+          '<div class="profile-insights-right">ver mais '+icoSvg("chevronRight",14,"var(--sub)")+'</div>' +
+        '</div>' : "") +
       '</div>' +
     '</div>' +
     renderProfileBooksSection(u, isMe) +
