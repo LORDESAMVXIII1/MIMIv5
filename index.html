@@ -10584,11 +10584,28 @@ function getFeedSharedObserver() {
   return _feedSharedObserver;
 }
 
+// Onde os players avançados (renderMimiPlayer/AdvancedVideoPlayer) podem
+// estar montados de verdade agora. Antes essa eleição só considerava
+// state.page === "feed", mas o MESMO player é usado no detalhe de um post
+// (postDetailId) e na aba "posts"/"músicas" do perfil (o próprio, ou o de
+// outra pessoa aberto por cima via state.viewProfileId) — fora do Feed,
+// nada nunca elegia um vídeo nem pausava os outros, então dava pra tocar
+// vários vídeos ao mesmo tempo manualmente, e nenhum obedecia a regra de
+// "só toca quando bem visível" que o Feed tem.
+function _mimiPlayersContextActive() {
+  if (state.page === "feed") return true;
+  if (state.postDetailId) return true;
+  if (profileTab === "posts" || profileTab === "músicas") {
+    if (state.page === "profile" || state.viewProfileId) return true;
+  }
+  return false;
+}
+
 // Escolhe qual vídeo (se algum) merece tocar com som agora, e força todos
 // os demais a ficarem pausados e mudos — nunca mais de um tocando ao mesmo
 // tempo, e nunca um vídeo que a pessoa ainda nem alcançou de verdade.
 function electActiveFeedVideo() {
-  if (state.page !== "feed" || hasOpenOverlay()) {
+  if (!_mimiPlayersContextActive() || hasOpenOverlay()) {
     pauseAllFeedVideos();
     _feedActiveVideoId = null;
     return;
@@ -10654,10 +10671,12 @@ function pauseAllFeedMedia() {
     if (!a.paused) a.pause();
   });
 }
-// Vídeo/música do Feed nunca deve tocar escondido: silencia tudo assim que
-// o app vai pra segundo plano (aba trocada, app minimizado, tela bloqueada).
+// Vídeo/música dos players avançados nunca deve tocar escondido: silencia
+// tudo assim que o app vai pra segundo plano (aba trocada, app minimizado,
+// tela bloqueada) — em qualquer lugar onde esses players estejam montados
+// (Feed, detalhe de post, aba Posts/Músicas do perfil), não só no Feed.
 document.addEventListener("visibilitychange", function() {
-  if (document.hidden && state.page === "feed") pauseAllFeedMedia();
+  if (document.hidden && _mimiPlayersContextActive()) pauseAllFeedMedia();
 });
 // PERF: em aparelhos com pouca RAM (2-3GB), o Chrome fica bem mais lento
 // pra fazer qualquer coisa quando, além da interação do usuário, o app
