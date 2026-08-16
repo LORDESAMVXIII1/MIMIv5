@@ -20744,9 +20744,14 @@ function startFpResendTimer() {
   }, 1000);
 }
 
-// ─── reCAPTCHA (necessário para envio de SMS do 2º fator) ─────
-// Carregado sob demanda (ver loadEnterpriseRecaptchaScript) pra não
-// conflitar com o App Check, que também usa window.grecaptcha.
+// ─── reCAPTCHA (necessário para envio de SMS do 2º fator e do login por
+// telefone) ─────────────────────────────────────────────────────────
+// Carregado sob demanda (ver loadEnterpriseRecaptchaScript). O App Check já
+// carrega seu próprio reCAPTCHA v3 (window.grecaptcha só com .ready/.execute,
+// sem .render) assim que o app abre — então depois de carregar o script do
+// reCAPTCHA Enterprise, ele pode aparecer em window.grecaptcha.enterprise
+// (namespace separado) em vez de sobrescrever window.grecaptcha direto.
+// _grecaptchaApi() acha qual dos dois tem .render disponível.
 var _recaptchaScriptPromise = null;
 function loadEnterpriseRecaptchaScript() {
   if (_recaptchaScriptPromise) return _recaptchaScriptPromise;
@@ -20760,14 +20765,23 @@ function loadEnterpriseRecaptchaScript() {
   });
   return _recaptchaScriptPromise;
 }
+function _grecaptchaApi() {
+  if (window.grecaptcha && window.grecaptcha.enterprise && window.grecaptcha.enterprise.render) return window.grecaptcha.enterprise;
+  if (window.grecaptcha && window.grecaptcha.render) return window.grecaptcha;
+  return null;
+}
 var _recaptchaReadyPromise = null;
 function recaptchaReady() {
   if (_recaptchaReadyPromise) return _recaptchaReadyPromise;
   _recaptchaReadyPromise = loadEnterpriseRecaptchaScript().then(function() {
-    return new Promise(function(resolve) {
+    return new Promise(function(resolve, reject) {
+      var waited = 0;
       (function poll() {
-        if (window.grecaptcha && window.grecaptcha.render) { window.grecaptcha.ready(function(){ resolve(); }); }
-        else setTimeout(poll, 200);
+        var api = _grecaptchaApi();
+        if (api) { api.ready(function(){ resolve(api); }); return; }
+        waited += 200;
+        if (waited >= 10000) { reject("Não foi possível carregar o reCAPTCHA (conflito com outro script de segurança). Tente novamente ou use outro método de login."); return; }
+        setTimeout(poll, 200);
       })();
     });
   });
@@ -20776,21 +20790,25 @@ function recaptchaReady() {
 // Executa um reCAPTCHA invisível dentro do elemento #containerId e resolve
 // com o token gerado (usado uma vez por tentativa de envio de SMS).
 function getRecaptchaToken(containerId, siteKey) {
-  return recaptchaReady().then(function() {
+  return recaptchaReady().then(function(api) {
     return new Promise(function(resolve, reject) {
       var el = document.getElementById(containerId);
       if (!el) { reject("Contêiner do reCAPTCHA não encontrado."); return; }
       el.innerHTML = "";
+      var settled = false;
+      var timeoutId = setTimeout(function() {
+        if (!settled) { settled = true; reject("O reCAPTCHA demorou demais para responder. Verifique sua conexão e tente novamente."); }
+      }, 15000);
       try {
-        var widgetId = window.grecaptcha.render(el, {
+        var widgetId = api.render(el, {
           sitekey: siteKey,
           size: "invisible",
-          callback: function(token) { resolve(token); },
-          "error-callback": function() { reject("Falha no reCAPTCHA. Tente novamente."); },
-          "expired-callback": function() { reject("reCAPTCHA expirou. Tente novamente."); }
+          callback: function(token) { if (!settled) { settled = true; clearTimeout(timeoutId); resolve(token); } },
+          "error-callback": function() { if (!settled) { settled = true; clearTimeout(timeoutId); reject("Falha no reCAPTCHA. Tente novamente."); } },
+          "expired-callback": function() { if (!settled) { settled = true; clearTimeout(timeoutId); reject("reCAPTCHA expirou. Tente novamente."); } }
         });
-        window.grecaptcha.execute(widgetId);
-      } catch (e) { reject(e); }
+        api.execute(widgetId);
+      } catch (e) { clearTimeout(timeoutId); reject(e); }
     });
   });
 }
