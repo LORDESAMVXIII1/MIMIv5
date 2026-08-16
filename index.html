@@ -1843,6 +1843,10 @@ function konvoMenuIcon(type) {
       return '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>';
     case "delete": // Lixo
       return '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6"/></svg>';
+    case "block": // Círculo com barra diagonal (bloquear)
+      return '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M5.5 5.5l13 13"/></svg>';
+    case "unblock": // Mesmo círculo, sem a barra (desbloquear)
+      return '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 12l2 2 4-4"/></svg>';
     default:
       return '';
   }
@@ -2859,20 +2863,54 @@ function ME_obj() { return USERS[ME_ID]; }
 var ME = ME_obj(); // kept for backward-compat reads; refreshed on demand via meRefresh()
 function meRefresh() { ME = USERS[ME_ID]; }
 
-// ─── BLOQUEIO DE USUÁRIOS (via long-press no comentário) ────────
+// ─── BLOQUEIO DE USUÁRIOS (via long-press no comentário, no perfil, nas
+// conversas) ──────────────────────────────────────────────────────────
+// BLOCKED_USERS = gente que EU bloqueei. BLOCKED_BY_OTHERS = gente que ME
+// bloqueou (índice reverso, sincronizado do Firestore — ver FB.loadBlockLists
+// / FB.blockUser). isUserBlocked() enxerga os dois: o bloqueio esconde o
+// conteúdo pros dois lados, não só pra quem apertou o botão.
 var BLOCKED_USERS = {};
+var BLOCKED_BY_OTHERS = {};
 (function() {
   try { BLOCKED_USERS = JSON.parse(localStorage.getItem("mimi_blocked_users") || "{}"); } catch(e) { BLOCKED_USERS = {}; }
 })();
-function isUserBlocked(userId) { return !!BLOCKED_USERS[userId]; }
+// Bloqueio "meu" (uso interno pra decidir texto/opção de desbloquear nos
+// menus — só quem bloqueou pode desbloquear).
+function iBlockedUser(userId) { return !!BLOCKED_USERS[userId]; }
+function isUserBlocked(userId) { return !!BLOCKED_USERS[userId] || !!BLOCKED_BY_OTHERS[userId]; }
 function saveBlockedUsers() { try { localStorage.setItem("mimi_blocked_users", JSON.stringify(BLOCKED_USERS)); } catch(e){} }
 function blockUserId(userId) {
   BLOCKED_USERS[userId] = true;
   saveBlockedUsers();
+  // Sincroniza no Firestore pra virar uma regra de verdade (vale pros
+  // dois lados e persiste entre aparelhos), não só uma preferência local.
+  if (typeof FB !== "undefined" && FB.blockUser) FB.blockUser(userId);
 }
 function unblockUserId(userId) {
   delete BLOCKED_USERS[userId];
   saveBlockedUsers();
+  if (typeof FB !== "undefined" && FB.unblockUser) FB.unblockUser(userId);
+}
+// Chamado no login/restauração de sessão: busca do Firestore quem eu
+// bloqueei (fonte de verdade agora, substitui a lista local) e quem me
+// bloqueou. Qualquer bloqueio feito localmente ANTES dessa sincronização
+// existir (só em localStorage, nunca gravado no Firestore) é migrado pra
+// lá agora, pra não se perder e pra passar a valer dos dois lados também.
+function loadMyBlockLists() {
+  if (typeof FB === "undefined" || !FB.loadBlockLists) return;
+  FB.loadBlockLists().then(function(lists) {
+    var remoteSet = {};
+    lists.iBlocked.forEach(function(id) { remoteSet[id] = true; });
+    // Migra bloqueios antigos (só locais) pro Firestore.
+    Object.keys(BLOCKED_USERS).forEach(function(id) {
+      if (!remoteSet[id]) FB.blockUser(id);
+    });
+    BLOCKED_USERS = Object.assign({}, BLOCKED_USERS, remoteSet);
+    saveBlockedUsers();
+    BLOCKED_BY_OTHERS = {};
+    lists.blockedByOthers.forEach(function(id) { BLOCKED_BY_OTHERS[id] = true; });
+    renderSoon();
+  }).catch(function(err){ console.warn("⚠️ Não consegui carregar a lista de bloqueios:", err && err.message || err); });
 }
 
 // 2.3 (sinais negativos) — "não tenho interesse" em vibes específicas.
@@ -6703,6 +6741,48 @@ var FB = {
     fsAdd("notifications/" + toUid + "/items", data).catch(function(){});
   },
 
+  // ── BLOQUEIO DE USUÁRIO (regra de verdade, valendo pros dois lados) ──
+  // Antes o bloqueio era só uma lista salva no aparelho (localStorage) —
+  // ou seja, só controlava o que EU via, e sumia se eu trocasse de
+  // aparelho/navegador; a pessoa bloqueada continuava me vendo e podia
+  // me mandar mensagem normalmente. Agora grava no Firestore em dois
+  // lugares:
+  //   blocks/{meu uid}/list/{uid da pessoa}   → minha lista de bloqueios
+  //   blockedBy/{uid da pessoa}/list/{meu uid} → índice reverso, pra ELA
+  //     também saber (ao carregar a própria sessão) que foi bloqueada por
+  //     mim, mesmo sem eu nunca ter contato direto com a conta dela.
+  // isUserBlocked() passa a valer true pros dois lados — eu bloqueei ELA,
+  // OU ela me bloqueou — escondendo o conteúdo dos dois lados igual.
+  blockUser: function(targetId) {
+    if (!_idToken || !_fbUid || !targetId || targetId === ME_ID) return Promise.resolve();
+    var now = new Date().toISOString();
+    return Promise.all([
+      fsSet("blocks/" + ME_ID + "/list/" + targetId, { createdAt: now }),
+      fsSet("blockedBy/" + targetId + "/list/" + ME_ID, { createdAt: now })
+    ]).catch(function(err){ console.warn("⚠️ Não consegui sincronizar o bloqueio:", err && err.message || err); });
+  },
+  unblockUser: function(targetId) {
+    if (!_idToken || !_fbUid || !targetId) return Promise.resolve();
+    return Promise.all([
+      fsDelete("blocks/" + ME_ID + "/list/" + targetId).catch(function(){}),
+      fsDelete("blockedBy/" + targetId + "/list/" + ME_ID).catch(function(){})
+    ]);
+  },
+  // Carrega, no login/restauração de sessão, quem EU bloqueei e quem ME
+  // bloqueou — os dois lados da regra.
+  loadBlockLists: function() {
+    if (!_idToken || !_fbUid) return Promise.resolve({ iBlocked: [], blockedByOthers: [] });
+    return Promise.all([
+      fsList("blocks/" + ME_ID + "/list").catch(function(){ return []; }),
+      fsList("blockedBy/" + ME_ID + "/list").catch(function(){ return []; })
+    ]).then(function(res) {
+      return {
+        iBlocked: (res[0]||[]).map(function(d){ return d._id; }).filter(Boolean),
+        blockedByOthers: (res[1]||[]).map(function(d){ return d._id; }).filter(Boolean)
+      };
+    });
+  },
+
   // ✅ FIX 4: Carrega notificações. Se `since` for passado, busca só as novas (incremental)
   loadNotifs: function(since) {
     if (!_idToken || !_fbUid) return Promise.resolve([]);
@@ -6713,7 +6793,11 @@ var FB = {
       // passou a mostrar isso direto pro dono. Filtra aqui (em vez de só
       // parar de criar novas) pra também sumir com as que já tinham sido
       // gravadas antes dessa mudança.
-      docs = docs.filter(function(d){ return d.type !== "profileView"; });
+      // FIX (bloqueio incompleto): curtida, comentário, seguidor novo etc.
+      // de alguém bloqueado ainda chegavam normalmente na aba de
+      // notificações — bloquear precisa cortar "tudo relacionado" à
+      // pessoa, notificação incluída.
+      docs = docs.filter(function(d){ return d.type !== "profileView" && !isUserBlocked(d.fromUid); });
       return docs.sort(function(a,b){
         return (b.createdAt||"").localeCompare(a.createdAt||"");
       });
@@ -9861,6 +9945,7 @@ function allStoriesList() {
   STORIES.forEach(function(s) {
     if (s.ownerId === ME_ID) return; // already added above
     if (!s.items.length) return;
+    if (isUserBlocked(s.ownerId)) return; // FIX (bloqueio incompleto): story de gente bloqueada não deve aparecer na barra
     // FIX: Filtrar contas demo/fakes (IDs como u998, u997, u996, u995, u994, etc)
     if (/^u\d+$/.test(s.ownerId)) {
       console.log("⏭️ Pulando conta demo:", s.ownerId);
@@ -12482,7 +12567,11 @@ function bindProfileSheet() {
           confirmLabel: "Bloquear",
           danger: true,
           onConfirm: function() {
-            showToast("Perfil bloqueado.");
+            // FIX: esse botão só mostrava o toast de sucesso e fechava o
+            // perfil, sem nunca chamar blockUserId — ou seja, "bloqueava"
+            // só na aparência, a pessoa continuava com acesso normal.
+            blockUserId(userId);
+            showToast(toastWithIcon("Perfil bloqueado.", "block"), true);
             closeProfile();
           }
         };
@@ -12605,6 +12694,10 @@ function buildExploreBodyHtml(q) {
   });
   html += '</div><div class="explore-grid">';
   posts.forEach(function(p) {
+    // FIX (bloqueio incompleto): posts de gente bloqueada ainda apareciam
+    // aqui no Explorar, mesmo já escondidos do Feed — bloquear precisa
+    // valer em todo lugar, não só na rolagem principal.
+    if (isUserBlocked(p.authorId)) return;
     if (p.img) html += '<div class="explore-cell" data-open-post="'+p.id+'" style="cursor:pointer;"><img '+imageTagAttrs(p.img)+' alt=""></div>';
   });
   EXPLORE_IMGS.forEach(function(id) { html += '<div class="explore-cell"><img src="https://images.unsplash.com/'+id+'?w=300&q=80" alt=""></div>'; });
@@ -12644,14 +12737,18 @@ function bindExploreBodyEvents(container) {
 
 function renderSearchResults(q) {
   var qLower = q.toLowerCase();
+  // FIX (bloqueio incompleto): a busca continuava mostrando o perfil e as
+  // publicações de gente bloqueada normalmente — some daqui também.
   // Inclui utilizadores locais (demo) E utilizadores reais já carregados
   var userResults = Object.values(USERS).filter(function(u) {
     if (!u || !u.name) return false;
+    if (isUserBlocked(u.uid || u._id)) return false;
     return (u.name||"").toLowerCase().indexOf(qLower) !== -1 ||
            (u.username||"").toLowerCase().indexOf(qLower) !== -1;
   });
   var postResults = posts.filter(function(p) {
     if (p.isAd && !adShowsIn(p, "search")) return false; // anúncio oculto/sem "Busca" não aparece aqui
+    if (isUserBlocked(p.authorId)) return false;
     return (p.text||"").toLowerCase().indexOf(qLower) !== -1;
   });
 
@@ -13223,7 +13320,17 @@ function renderChatView(conv) {
     '</div>';
   }
   html += '</div>' +
-    '<div class="chat-input-row" data-chat-input-row>' +
+    // FIX (bloqueio incompleto): dava pra continuar mandando mensagem
+    // normalmente numa conversa com alguém que você bloqueou. Enquanto o
+    // bloqueio estiver ativo, a caixa de digitar/anexar some e entra um
+    // aviso no lugar — pra desbloquear, use o menu de "..." aqui ou o
+    // long-press na lista de conversas.
+    (isUserBlocked(conv.userId)
+      ? '<div class="chat-input-row" style="display:flex;align-items:center;justify-content:center;gap:10px;padding:14px;text-align:center;color:var(--muted);font-size:13px;">' +
+          icoSvg("close",16,"var(--muted)") +
+          '<span>Você bloqueou '+esc(u.name)+'. Desbloqueie pra continuar a conversa.</span>' +
+        '</div>'
+      : '<div class="chat-input-row" data-chat-input-row>' +
       '<div class="chat-input-main">' +
         '<button class="chat-plus-btn" data-chat-plus type="button" aria-label="Anexar">'+icoSvg("plus",22,C.accent)+'</button>' +
         '<div class="chat-input-pill">' +
@@ -13242,7 +13349,7 @@ function renderChatView(conv) {
         '<button class="chat-attach-opt" data-chat-media="sticker">'+icoSvg("sticker",20,C.accent)+'<span>Figurinha</span></button>' +
       '</div>' +
       '<input type="file" data-chat-file-input accept="" class="hidden">' +
-    '</div>' +
+    '</div>') +
   '</div>';
   return html;
 }
@@ -14118,6 +14225,12 @@ function sendChatMessage() {
   if (!input) return;
   var text = input.value.trim();
   if (!text) return;
+  // FIX (bloqueio incompleto): segunda camada de proteção — mesmo que a
+  // caixa de digitar tenha sumido pra conversa bloqueada (ver
+  // renderChatView), isso impede o envio também se algo ainda chamar essa
+  // função diretamente (ex.: Enter disparado antes do re-render aplicar).
+  var _convForBlock = CONVOS.find(function(c){ return c.id === state.activeConvoId; });
+  if (_convForBlock && isUserBlocked(_convForBlock.userId)) return;
   
   var localId = uid();
   var chat = _chatRaw(state.activeConvoId);
@@ -15458,6 +15571,18 @@ function showConvoMenu(convoId) {
   var pinIcon = conv.pinned ? konvoMenuIcon("unpin") : konvoMenuIcon("pin");
   var archiveLabel = conv.archived ? "Restaurar conversa" : "Arquivar conversa";
   var archiveIcon = conv.archived ? konvoMenuIcon("restore") : konvoMenuIcon("archive");
+  // FIX (bloquear sem precisar abrir o perfil): antes só dava pra bloquear
+  // alguém indo no "..." do perfil da pessoa (que além de exigir mais
+  // passos, tinha um bug — não chamava blockUserId de verdade, ver
+  // correção acima). Agora dá pra bloquear/desbloquear direto daqui,
+  // segurando o dedo na conversa, igual já funciona pra fixar/arquivar.
+  // Usa iBlockedUser (não isUserBlocked) aqui de propósito: se foi a OUTRA
+  // pessoa quem me bloqueou (e eu não bloqueei ela), preciso continuar
+  // vendo a opção "Bloquear" pra também poder bloquear — "Desbloquear"
+  // não faria sentido pra uma decisão que não foi minha.
+  var blocked = iBlockedUser(conv.userId);
+  var blockLabel = blocked ? "Desbloquear " + esc(u.name) : "Bloquear " + esc(u.name);
+  var blockIcon = blocked ? konvoMenuIcon("unblock") : konvoMenuIcon("block");
   
   menu.innerHTML = 
     '<div class="convo-action-menu-backdrop"></div>' +
@@ -15470,6 +15595,10 @@ function showConvoMenu(convoId) {
       '<button class="convo-action-menu-item" data-convo-action-archive="'+convoId+'">' +
         archiveIcon +
         '<span style="margin-left:12px;">'+archiveLabel+'</span>' +
+      '</button>' +
+      '<button class="convo-action-menu-item convo-action-menu-danger" data-convo-action-block="'+convoId+'">' +
+        blockIcon +
+        '<span style="margin-left:12px;">'+blockLabel+'</span>' +
       '</button>' +
       '<button class="convo-action-menu-item convo-action-menu-danger" data-convo-action-delete="'+convoId+'">' +
         konvoMenuIcon("delete") +
@@ -15501,6 +15630,34 @@ function showConvoMenu(convoId) {
     archiveBtn.addEventListener("click", function() {
       closeConvoMenu();
       toggleArchiveConvo(convoId);
+    });
+  }
+
+  // Block / Unblock
+  var blockBtn = menu.querySelector("[data-convo-action-block]");
+  if (blockBtn) {
+    blockBtn.addEventListener("click", function() {
+      closeConvoMenu();
+      if (blocked) {
+        // Desbloquear não precisa de confirmação — é a ação "segura", que
+        // devolve acesso, então não tem o mesmo risco de ser feita sem querer.
+        unblockUserId(conv.userId);
+        showToast(toastWithIcon(u.name + " foi desbloqueado(a).", "success"), true);
+        render();
+      } else {
+        state.confirmDialog = {
+          title: "Bloquear " + u.name + "?",
+          text: "Essa pessoa não poderá mais ver seu perfil, te enviar mensagens ou ligar pra você. As publicações e comentários dela deixarão de aparecer pra você.",
+          confirmLabel: "Bloquear",
+          danger: true,
+          onConfirm: function() {
+            blockUserId(conv.userId);
+            showToast(toastWithIcon(u.name + " foi bloqueado(a).", "block"), true);
+            render();
+          }
+        };
+        render();
+      }
     });
   }
   
@@ -16661,6 +16818,28 @@ function renderProfilePage(userId) {
   var u = USERS[userId];
   if (!u) return '<div class="search-empty">Perfil não encontrado.</div>';
   var isMe = userId === ME_ID;
+  // FIX (bloqueio incompleto): bloquear alguém só escondia os comentários
+  // dela — o perfil, os posts e as Vibes continuavam totalmente visíveis
+  // pra quem bloqueou. Bloquear agora esconde TUDO relacionado à pessoa:
+  // abrir o perfil dela não mostra mais nada do conteúdo. Dois textos
+  // diferentes conforme o lado do bloqueio: se fui EU quem bloqueou, mostro
+  // a opção de desbloquear ali mesmo; se foi ELA quem me bloqueou (regra
+  // agora vale nos dois sentidos via Firestore), não faz sentido eu ter
+  // como "desbloquear" uma decisão que não é minha — só um aviso neutro.
+  if (!isMe && isUserBlocked(userId)) {
+    var _iBlocked = iBlockedUser(userId);
+    return '<div style="padding:16px;">' +
+      '<button class="icon-btn" data-back-profile>'+icoSvg("back",20)+'</button>' +
+      '<div style="display:flex;flex-direction:column;align-items:center;gap:14px;padding:50px 28px 30px;text-align:center;">' +
+        '<div style="width:84px;height:84px;border-radius:50%;background:var(--surface2,rgba(255,255,255,.08));display:flex;align-items:center;justify-content:center;">'+icoSvg("close",34,"var(--muted)")+'</div>' +
+        '<div style="font-weight:700;font-size:17px;">'+esc(u.name||"Usuário")+'</div>' +
+        (_iBlocked
+          ? '<div style="color:var(--muted);font-size:14px;max-width:280px;line-height:1.5;">Você bloqueou este perfil. Publicações, Vibes e informações dele(a) ficam ocultos até você desbloquear.</div>' +
+            '<button class="btn btn-sm btn-secondary" data-unblock-profile="'+userId+'" style="margin-top:6px;">Desbloquear</button>'
+          : '<div style="color:var(--muted);font-size:14px;max-width:280px;line-height:1.5;">Este perfil não está disponível.</div>') +
+      '</div>' +
+    '</div>';
+  }
   var tabs = FEED_MUSIC_POSTS_ENABLED
     ? (isMe ? ["posts","músicas","mídia","curtidas","salvos"] : ["posts","músicas","mídia"].concat(u.hideLikesTab ? [] : ["curtidas"]))
     : (isMe ? ["posts","mídia","curtidas","salvos"] : ["posts","mídia"].concat(u.hideLikesTab ? [] : ["curtidas"]));
@@ -16840,6 +17019,15 @@ function bindProfilePage(userId) {
   if (profileTab === "posts" || profileTab === "músicas") { bindPostCardEvents(); bindMimiPlayers(); bindProfileVibePreviews(); }
   var backBtn = appEl.querySelector("[data-back-profile]");
   if (backBtn) backBtn.addEventListener("click", closeProfile);
+
+  var unblockBtn = appEl.querySelector("[data-unblock-profile]");
+  if (unblockBtn) unblockBtn.addEventListener("click", function() {
+    var targetId = unblockBtn.getAttribute("data-unblock-profile");
+    var target = USERS[targetId];
+    unblockUserId(targetId);
+    showToast(toastWithIcon((target ? target.name : "Usuário") + " foi desbloqueado(a).", "success"), true);
+    render();
+  });
 
   var profileSheetBtn = appEl.querySelector("[data-open-profile-sheet]");
   if (profileSheetBtn) profileSheetBtn.addEventListener("click", function() {
@@ -17753,6 +17941,9 @@ function renderFollowListPage() {
   if (f.kind === "followers") ensureFreshFollowers(f.userId);
   var u = USERS[f.userId] || { followers: [], following: [] };
   var ids = f.kind === "followers" ? (u.followers||[]) : (u.following||[]);
+  // FIX (bloqueio incompleto): gente bloqueada continuava aparecendo
+  // normalmente nas listas de seguidores/seguindo.
+  ids = ids.filter(function(id){ return !isUserBlocked(id); });
   var title = f.kind === "followers" ? "Seguidores" : "Seguindo";
   // Carrega em background perfis desconhecidos
   if (_idToken) {
@@ -19732,6 +19923,9 @@ function onAuthSuccess(u) {
   }).catch(function(){});
   startNotifPolling();
   startCallPolling();
+
+  // ── 5. Bloqueios (regra de verdade, valendo pros dois lados) ──────
+  loadMyBlockLists();
 }
 
 function bindAuthPage() {
@@ -20840,6 +21034,9 @@ function checkAgeVerificationLinkFromUrl() {
         // ── 5. Polling de notificações ────────────────────────
         startNotifPolling();
         startCallPolling();
+
+        // ── 6. Bloqueios (regra de verdade, valendo pros dois lados) ──
+        loadMyBlockLists();
       } else {
         render(); // Renderiza tela de login se usuário não carregar
       }
