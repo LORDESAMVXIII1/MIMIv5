@@ -1021,6 +1021,7 @@
   .profile-header-wrap { position:relative; }
   .profile-actions { display:flex; gap:8px; padding-top:50px; }
   .profile-name-row { display:flex; align-items:center; gap:5px; margin-bottom:2px; }
+  .profile-bday-chip { display:inline-flex; align-items:center; gap:3px; background:rgba(255,95,168,.14); border:1px solid rgba(255,95,168,.4); color:#ff5fa8; font-size:10px; font-weight:700; padding:2px 7px 2px 5px; border-radius:20px; line-height:1.4; white-space:nowrap; }
   .profile-username { font-size:13px; color:var(--muted); margin-bottom:8px; }
   .profile-bio { font-size:14px; color:var(--sub); line-height:1.6; margin:0 0 10px; }
   .profile-meta-row { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
@@ -1611,6 +1612,7 @@
 .birthday-avatars { display: flex; justify-content: center; gap: 16px; margin-bottom: 28px; flex-wrap: wrap; }
 .birthday-avatar-wrap { display: flex; flex-direction: column; align-items: center; gap: 8px; animation: bdayAvatarBounce .6s cubic-bezier(.16,1,.3,1); }
 @keyframes bdayAvatarBounce { 0%{opacity:0;transform:translateY(-20px) scale(.8)} 100%{opacity:1;transform:translateY(0) scale(1)} }
+.birthday-avatar-holder { position: relative; width: 80px; height: 80px; }
 .birthday-avatar {
   position: relative; width: 80px; height: 80px; border-radius: 50%; overflow: hidden;
   border: 3px solid #ff5fa8; box-shadow: 0 0 18px rgba(255,95,168,.6);
@@ -1619,9 +1621,10 @@
 @keyframes bdayAvatarGlow { 0%,100%{box-shadow:0 0 18px rgba(255,95,168,.6)} 50%{box-shadow:0 0 28px rgba(255,95,168,.9)} }
 .birthday-avatar-img { width: 100%; height: 100%; object-fit: cover; }
 .birthday-age {
-  position: absolute; bottom: -8px; right: -8px; width: 36px; height: 36px; border-radius: 50%;
+  position: absolute; bottom: -6px; right: -6px; min-width: 26px; height: 26px; padding: 0 4px; border-radius: 13px;
   background: #ff5fa8; color: #1a0e14; display: flex; align-items: center; justify-content: center;
-  font-size: 16px; font-weight: 800; box-shadow: 0 4px 12px rgba(0,0,0,.3); border: 3px solid #180510;
+  font-size: 13px; font-weight: 800; box-shadow: 0 4px 12px rgba(0,0,0,.3); border: 3px solid #180510;
+  z-index: 2; line-height: 1;
 }
 .birthday-name {
   font-size: 14px; font-weight: 700; color: #ffd7e8; text-align: center;
@@ -1638,18 +1641,20 @@
 .birthday-btn-primary:active { transform: scale(.96); box-shadow: 0 0 10px rgba(255,95,168,.4); }
 .birthday-btn-secondary { background: rgba(255,255,255,.08); color: #fff; border: 1.5px solid rgba(255,255,255,.15); }
 .birthday-btn-secondary:active { background: rgba(255,255,255,.14); transform: scale(.96); }
+.birthday-title-icon { display: flex; justify-content: center; margin-bottom: 6px; filter: drop-shadow(0 0 8px rgba(255,95,168,.6)); }
 .birthday-balloons { display: flex; justify-content: center; gap: 12px; margin-top: 20px; }
-.balloon { font-size: 32px; display: inline-block; filter: drop-shadow(0 0 6px rgba(255,95,168,.7)); animation: bdayBalloonFloat 3s ease-in-out infinite; animation-delay: var(--delay); }
+.balloon { display: inline-flex; filter: drop-shadow(0 0 6px rgba(255,95,168,.7)); animation: bdayBalloonFloat 3s ease-in-out infinite; animation-delay: var(--delay); }
 @keyframes bdayBalloonFloat { 0%,100%{transform:translateY(0) rotate(0deg);opacity:.6} 50%{transform:translateY(-16px) rotate(6deg);opacity:1} }
 .birthday-confetti-container { position: absolute; inset: 0; overflow: hidden; pointer-events: none; border-radius: 24px; }
-.confetti-piece { position: absolute; font-size: 24px; line-height: 1; opacity: 1; pointer-events: none; filter: drop-shadow(0 0 4px rgba(255,95,168,.6)); }
+/* Nome diferente de "confetti-piece" de propósito — essa classe já é usada
+   pela chuva de corações da carta de amor (heartFall), com outra animação. */
+.bday-confetti-piece { position: absolute; line-height: 1; opacity: 1; pointer-events: none; display: flex; }
 @keyframes confettiFall { 0%{top:-20px;opacity:1;transform:translateY(0) rotate(0deg) scale(1)} 100%{top:100%;opacity:0;transform:translateY(0) rotate(360deg) scale(.3)} }
 @media (max-width: 480px) {
   .birthday-modal-content { padding: 32px 16px; max-width: calc(100% - 32px); }
   .birthday-title { font-size: 24px; }
   .birthday-avatar { width: 72px; height: 72px; }
   .birthday-balloons { gap: 8px; }
-  .balloon { font-size: 28px; }
 }
 </style>
 </head>
@@ -1867,6 +1872,9 @@ var ICONS = {
   sticker:  "M4 4h13a3 3 0 013 3v9l-6 6H4a3 3 0 01-3-3V7a3 3 0 013-3z M20 16h-3a3 3 0 00-3 3v3",
   hash:     "M4 9h16M4 15h16M10 3L8 21M16 3l-2 18",
   gamepad:  "M7 7h10a4 4 0 014 4v3.5a3.5 3.5 0 01-6.24 2.19L14 16H10l-.76.69A3.5 3.5 0 013 13.5V11a4 4 0 014-4z M7.5 10.5v3M6 12h3M14.5 11.25h.01M17 13h.01",
+  cake:     "M12 2v3 M9 5c0 1.1.9 2 2 2s2-.9 2-2c0-1-2-3-2-3s-2 2-2 3z M4 21v-7a2 2 0 012-2h12a2 2 0 012 2v7 M4 21h16 M4 17c1 1 2 1 3 0s2-1 3 0 2 1 3 0 2-1 3 0 2 1 3 0 M8 12v-2a2 2 0 014 0v2 M2 21h20",
+  gift:     "M20 12v10H4V12 M2 7h20v5H2V7z M12 22V7 M12 7H7.5a2.5 2.5 0 010-5C11 2 12 7 12 7z M12 7h4.5a2.5 2.5 0 000-5C13 2 12 7 12 7z",
+  balloon:  "M12 2a6 6 0 00-2 11.65V16a2 2 0 002 2 2 2 0 002-2v-2.35A6 6 0 0012 2z M11 18l-.6 3a1 1 0 001 1.2h1.2a1 1 0 001-1.2l-.6-3",
 };
 
 function icoSvg(name, size, color, fill) {
@@ -2560,6 +2568,18 @@ function fmtNum(n) {
   return (neg ? "-" : "") + out;
 }
 function esc(s) { var d=document.createElement("div"); d.innerText = s==null ? "" : s; return d.innerHTML.replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
+
+// Checa se uma data de nascimento (YYYY-MM-DD) cai hoje (mês/dia), ignorando
+// o ano. Usada tanto pelo BirthdayNotifier quanto pelo aviso pequeno no
+// perfil, pra não duplicar a mesma lógica em dois lugares.
+function isBirthdayToday(birthDate) {
+  if (!birthDate) return false;
+  try {
+    var b = new Date(birthDate + "T00:00:00");
+    var t = new Date();
+    return b.getMonth() === t.getMonth() && b.getDate() === t.getDate();
+  } catch (e) { return false; }
+}
 function nowTime() { var n=new Date(); return String(n.getHours()).padStart(2,"0")+":"+String(n.getMinutes()).padStart(2,"0"); }
 function uid() { return Date.now()+"_"+Math.floor(Math.random()*100000); }
 
@@ -13220,7 +13240,7 @@ function renderNotifsPage() {
     html += '<div class="notif-row '+(n.read?"":"unread")+'" data-notif-id="'+n.id+'">' +
       '<div style="position:relative;cursor:pointer;" data-open-author="'+n.userId+'">' + avatarHtml(avatar, 46, false, false, false, null, null, getUserFrame(u)) +
         (n.type === "birthday"
-          ? '<div class="notif-badge" style="background:#ff5fa8;font-size:12px;display:flex;align-items:center;justify-content:center;">🎂</div>'
+          ? '<div class="notif-badge" style="background:#ff5fa8;display:flex;align-items:center;justify-content:center;">'+icoSvg("cake",13,"#fff")+'</div>'
           : '<div class="notif-badge" style="background:'+(colMap[n.type]||C.accent)+';">'+icoSvg(iconMap[n.type]||"bell",11,"#fff")+'</div>') +
       '</div>' +
       '<div class="grow" data-open-author="'+n.userId+'" style="cursor:pointer;">' +
@@ -17223,6 +17243,11 @@ function ensureFreshFollowers(userId) {
   });
 }
 
+// Aviso pequeno mostrado ao lado do nome quando é o aniversário da pessoa
+// hoje — discreto (chip pequeno), não o modal/confete de tela cheia.
+function profileBirthdayBadge() {
+  return ' <span class="profile-bday-chip" title="Aniversário hoje">'+icoSvg("cake",12,"#ff5fa8")+'<span>Aniversário hoje</span></span>';
+}
 function renderProfilePage(userId) {
   ensureFreshFollowers(userId);
   // Garante que VibesModule.vibes esteja carregado mesmo se o usuário nunca
@@ -17295,7 +17320,7 @@ function renderProfilePage(userId) {
         '</div>' +
       '</div>' +
       '<div style="margin-top:'+(getUserFrame(u)?26:10)+'px;">' +
-        '<div class="profile-name-row"><span class="display'+(showGlow?" profile-name-glow":"")+'" style="font-size:18px;">'+esc(u.name)+'</span> '+userVerifiedBadge(u,23)+'</div>' +
+        '<div class="profile-name-row"><span class="display'+(showGlow?" profile-name-glow":"")+'" style="font-size:18px;">'+esc(u.name)+'</span> '+userVerifiedBadge(u,23)+(isBirthdayToday(u.birthDate)?profileBirthdayBadge():"")+'</div>' +
         '<div class="profile-username" data-copy-username="'+esc(u.username)+'" style="cursor:pointer;" title="Toque para copiar">'+esc(u.username)+'</div>' +
         '<p class="profile-bio">'+renderBioWithMentions(u.bio||"")+'</p>' +
         '<div class="profile-meta-row">' +
@@ -23117,15 +23142,6 @@ var BirthdayNotifier = (function () {
     return "mimi_bday_notifs_" + todayKey();
   }
 
-  function isBirthdayToday(birthDate) {
-    if (!birthDate) return false;
-    try {
-      var b = new Date(birthDate + "T00:00:00");
-      var t = new Date();
-      return b.getMonth() === t.getMonth() && b.getDate() === t.getDate();
-    } catch (e) { return false; }
-  }
-
   function calculateAge(birthDate) {
     try {
       var b = new Date(birthDate + "T00:00:00");
@@ -23166,8 +23182,8 @@ var BirthdayNotifier = (function () {
   function pushToNotifsList(birthdays) {
     var entries = birthdays.map(function (b) {
       var text = b.isMe
-        ? "🎉 Hoje é seu aniversário! Parabéns! 💕"
-        : "está fazendo aniversário hoje! 🎂";
+        ? "Hoje é seu aniversário! Parabéns!"
+        : "está fazendo aniversário hoje!";
       return {
         id: (typeof uid === "function") ? uid() : ("bday-" + Date.now() + "-" + b.uid),
         type: "birthday",
@@ -23244,13 +23260,18 @@ var BirthdayNotifier = (function () {
     } catch (e) { console.warn("BirthdayNotifier:", e); }
   }
 
+  // ✅ Confete sem emoji — pequenos ícones SVG (estrela/coração/sparkle)
+  // em cores do tema, girados e coloridos aleatoriamente.
+  var CONFETTI_ICONS = ["star", "heart", "sparkle"];
+  var CONFETTI_COLORS = ["#ff5fa8", "#ff8fc0", "#ffd7e8", "#ffb454"];
   function animateConfetti(container) {
     if (!container) return;
-    var pieces = ["🎉","🎊","🎈","🎁","🎂","💕","✨","⭐","🌟","💝"];
     for (var i = 0; i < 40; i++) {
       var el = document.createElement("div");
-      el.className = "confetti-piece";
-      el.textContent = pieces[Math.floor(Math.random() * pieces.length)];
+      el.className = "bday-confetti-piece";
+      var icon = CONFETTI_ICONS[Math.floor(Math.random() * CONFETTI_ICONS.length)];
+      var color = CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)];
+      el.innerHTML = icoSvg(icon, 14, color, true);
       var x = Math.random() * 100, delay = Math.random() * 0.5, dur = 2 + Math.random(), rot = Math.random() * 360;
       el.style.cssText = "left:" + x + "%; animation: confettiFall " + dur + "s ease-in " + delay + "s forwards; transform: rotate(" + rot + "deg);";
       container.appendChild(el);
@@ -23263,32 +23284,35 @@ var BirthdayNotifier = (function () {
 
     var isMe = birthdays.length === 1 && birthdays[0].isMe;
     var subtitle = isMe
-      ? "🎉 É seu aniversário!"
-      : (birthdays.length === 1 ? "🎂 " + esc(birthdays[0].name) + " está fazendo aniversário!" : "🎉 Tem aniversário hoje!");
+      ? "É seu aniversário!"
+      : (birthdays.length === 1 ? esc(birthdays[0].name) + " está fazendo aniversário!" : "Tem aniversário hoje!");
     var message = isMe
-      ? "Que este seja um dia especial cheio de alegria, amor e momentos inesquecíveis! 💕"
+      ? "Que este seja um dia especial cheio de alegria, amor e momentos inesquecíveis!"
       : (birthdays.length === 1
-        ? "Que este seja um dia inesquecível, repleto de sorrisos e celebrações! 🎊"
-        : "Feliz aniversário para todos! Que este seja um dia mágico! ✨");
+        ? "Que este seja um dia inesquecível, repleto de sorrisos e celebrações!"
+        : "Feliz aniversário para todos! Que este seja um dia mágico!");
 
     var avatarsHtml = birthdays.map(function (b, i) {
       return '<div class="birthday-avatar-wrap" style="animation-delay:' + (i * 0.1) + 's">' +
-        '<div class="birthday-avatar"><img class="birthday-avatar-img" src="' + esc(b.avatar) + '" alt="' + esc(b.name) + '">' +
-        (b.age != null ? '<span class="birthday-age">' + b.age + '</span>' : '') + '</div>' +
+        '<div class="birthday-avatar-holder">' +
+          '<div class="birthday-avatar"><img class="birthday-avatar-img" src="' + esc(b.avatar) + '" alt="' + esc(b.name) + '"></div>' +
+          (b.age != null ? '<span class="birthday-age">' + b.age + '</span>' : '') +
+        '</div>' +
         '<div class="birthday-name">' + esc(b.name) + '</div></div>';
     }).join("");
 
     var sendMsgBtn = (birthdays.length === 1 && !birthdays[0].isMe)
-      ? '<button class="birthday-btn birthday-btn-primary" data-bday-open-profile="' + esc(birthdays[0].uid) + '">Ver perfil 💌</button>'
+      ? '<button class="birthday-btn birthday-btn-primary" data-bday-open-profile="' + esc(birthdays[0].uid) + '">' + icoSvg("user", 15) + ' Ver perfil</button>'
       : "";
 
     var html =
       '<div class="birthday-modal-overlay" id="birthday-modal">' +
         '<div class="birthday-modal-content">' +
-          '<button class="birthday-close-btn" data-bday-close>✕</button>' +
+          '<button class="birthday-close-btn" data-bday-close>' + icoSvg("close", 18, "#fff") + '</button>' +
           '<div class="birthday-confetti-container" id="bday-confetti"></div>' +
           '<div class="birthday-header">' +
-            '<h2 class="birthday-title">' + (isMe ? "🎉 Parabéns!" : "🎂 Aniversário!") + '</h2>' +
+            '<div class="birthday-title-icon">' + icoSvg("cake", 34, "#ff8fc0") + '</div>' +
+            '<h2 class="birthday-title">' + (isMe ? "Parabéns!" : "Aniversário!") + '</h2>' +
             '<p class="birthday-subtitle">' + subtitle + '</p>' +
           '</div>' +
           '<div class="birthday-avatars">' + avatarsHtml + '</div>' +
@@ -23297,11 +23321,11 @@ var BirthdayNotifier = (function () {
             '<button class="birthday-btn birthday-btn-secondary" data-bday-close>Fechar</button>' +
           '</div>' +
           '<div class="birthday-balloons">' +
-            '<span class="balloon" style="--delay:0s">🎈</span>' +
-            '<span class="balloon" style="--delay:.2s">🎈</span>' +
-            '<span class="balloon" style="--delay:.4s">🎈</span>' +
-            '<span class="balloon" style="--delay:.6s">🎈</span>' +
-            '<span class="balloon" style="--delay:.8s">🎈</span>' +
+            '<span class="balloon" style="--delay:0s">' + icoSvg("balloon", 26, "#ff5fa8", true) + '</span>' +
+            '<span class="balloon" style="--delay:.2s">' + icoSvg("balloon", 26, "#ff8fc0", true) + '</span>' +
+            '<span class="balloon" style="--delay:.4s">' + icoSvg("balloon", 26, "#ff5fa8", true) + '</span>' +
+            '<span class="balloon" style="--delay:.6s">' + icoSvg("balloon", 26, "#ffb454", true) + '</span>' +
+            '<span class="balloon" style="--delay:.8s">' + icoSvg("balloon", 26, "#ff8fc0", true) + '</span>' +
           '</div>' +
         '</div>' +
       '</div>';
