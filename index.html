@@ -1337,7 +1337,7 @@
      os dois, em vez de Configurações ter aba própria na navegação. */
   .profile-swipe-wrap { overflow:hidden; width:100%; touch-action:pan-y; }
   .profile-swipe-track { display:flex; align-items:flex-start; width:200%; transition:transform .3s cubic-bezier(.22,.68,.32,1); }
-  .profile-swipe-panel { width:50%; flex-shrink:0; min-height:100vh; overflow-x:hidden; }
+  .profile-swipe-panel { width:50%; flex-shrink:0; overflow-x:hidden; }
 
   .cfg-item.danger .cfg-item-label { color:#e0507a; }
   .cfg-item.danger .cfg-item-icon { background:#fff0f0; }
@@ -8011,6 +8011,12 @@ function backgroundRender() {
   // marcamos como pendente e aplicamos o render assim que a tela for
   // fechada.
   if (state.profileViewersFor) { _pendingBackgroundRender = true; return; }
+  // FIX (tela "Livros de ..." piscando): faltava aqui a mesma guarda já
+  // aplicada em "Quem viu meu perfil" e nos outros overlays acima — sem
+  // ela, qualquer poll de fundo (notificações, stories, reações, presença)
+  // reconstruía appEl.innerHTML inteiro por baixo da tela de livros de
+  // alguém, mesmo sem nenhuma ação do usuário.
+  if (state.booksPageFor) { _pendingBackgroundRender = true; return; }
   // FIX: mesmo motivo do Feed/Vibes acima — a aba "posts"/"músicas" do
   // perfil (o próprio, ou o de outra pessoa aberto por cima via
   // state.viewProfileId) usa os MESMOS players de vídeo (posts normais E
@@ -10946,6 +10952,7 @@ function hasOpenOverlay() {
     activeCall || incomingCall || state.actionSheetPostId || state.profileSheetUserId ||
     state.confirmDialog || state.paywallDialog || state.addBooksSheetOpen || state.bookPicker ||
     state.isbnScanOpen || state.bookAddDraft || state.bookActionFor || state.moderationPanelOpen ||
+    state.booksPageFor ||
     document.querySelector("[data-story-comments-panel]")
   );
 }
@@ -17065,8 +17072,8 @@ function renderProfileWithSettings() {
   }
   return '<div class="profile-swipe-wrap" data-profile-swipe>' +
     '<div class="profile-swipe-track" id="profileSwipeTrack" style="transform:translateX('+(atSettings?"-50%":"0%")+');">' +
-      '<div class="profile-swipe-panel">' + profileHtml + '</div>' +
-      '<div class="profile-swipe-panel">' + settingsHtml + '</div>' +
+      '<div class="profile-swipe-panel" id="profileSwipePanelProfile">' + profileHtml + '</div>' +
+      '<div class="profile-swipe-panel" id="profileSwipePanelSettings">' + settingsHtml + '</div>' +
     '</div>' +
   '</div>';
 }
@@ -17084,6 +17091,21 @@ function bindProfileSwipe() {
   var wrap = appEl.querySelector('[data-profile-swipe]');
   var track = appEl.querySelector('#profileSwipeTrack');
   if (!wrap || !track) return;
+
+  // FIX (vácuo enorme embaixo de Configurações): os dois painéis (perfil e
+  // configurações) ficam lado a lado dentro do mesmo track flex, então sem
+  // isso o wrap sempre assumia a altura do painel MAIOR dos dois — como o
+  // perfil (com posts/fotos) costuma ser bem mais alto que a tela de
+  // configurações, ao abrir configurações sobrava um espaço vazio enorme
+  // do tamanho da diferença. Aqui a altura do wrap é ajustada na mão pra
+  // bater só com o painel que está de fato visível no momento.
+  function syncSwipeWrapHeight() {
+    var activePanel = appEl.querySelector(
+      state.profileSubView === "settings" ? '#profileSwipePanelSettings' : '#profileSwipePanelProfile'
+    );
+    if (activePanel) wrap.style.height = activePanel.offsetHeight + 'px';
+  }
+  syncSwipeWrapHeight();
 
   var openBtns = appEl.querySelectorAll('[data-open-settings]');
   openBtns.forEach(function(b){ b.addEventListener('click', goToSettingsPanel); });
@@ -17115,6 +17137,16 @@ function bindProfileSwipe() {
     dx = allowed;
     var pct = (dx / trackWidthPx) * 100;
     track.style.transform = 'translateX(' + (baseX + pct) + '%)';
+    // Interpola a altura do wrap entre os dois painéis conforme o arrasto
+    // avança, pra evitar um salto/vácuo brusco no meio do gesto.
+    var profilePanel = appEl.querySelector('#profileSwipePanelProfile');
+    var settingsPanel = appEl.querySelector('#profileSwipePanelSettings');
+    if (profilePanel && settingsPanel) {
+      var progress = Math.min(1, Math.abs(pct) / 50); // 0 = painel de origem, 1 = painel de destino
+      var fromH = state.profileSubView === "settings" ? settingsPanel.offsetHeight : profilePanel.offsetHeight;
+      var toH = state.profileSubView === "settings" ? profilePanel.offsetHeight : settingsPanel.offsetHeight;
+      wrap.style.height = (fromH + (toH - fromH) * progress) + 'px';
+    }
   }
   function onEnd() {
     if (!dragging) return;
@@ -17134,6 +17166,7 @@ function bindProfileSwipe() {
     }
     // não passou do limite: volta pro painel atual suavemente
     track.style.transform = 'translateX(' + baseX + '%)';
+    syncSwipeWrapHeight();
     isSwipe = false;
   }
 
@@ -18421,14 +18454,19 @@ function renderProfileViewersPage() {
     // atualiza a tela (mesmo truque do renderStoryViewer)
     if (typeof FB !== "undefined" && FB.getProfileViewers) {
       FB.getProfileViewers(ownerId).then(function(list){
-        state.profileViewersCache[ownerId] = list || [];
+        // FIX: pessoas bloqueadas (em qualquer direção — eu bloqueei ou fui
+        // bloqueado por elas) continuavam aparecendo em "quem viu meu
+        // perfil", mesmo já sumindo de outros lugares do app (feed, busca
+        // etc). Filtra aqui do mesmo jeito que o resto do app já faz.
+        var filtered = (list || []).filter(function(v){ return !isUserBlocked(v.uid); });
+        state.profileViewersCache[ownerId] = filtered;
         // AUTO-CORREÇÃO: profileViewCount deveria ser o número de perfis
         // distintos que visitaram (= tamanho dessa lista), não o número de
         // visitas somadas. Contas antigas (de antes desse fix) podem estar
         // com o total acima do real (ex: "2 visitas" com só 1 pessoa na
         // lista) — quando o dono abre essa tela, corrige o total pra bater
         // com a lista de uma vez, sem precisar esperar uma nova visita.
-        var realTotal = (list || []).length;
+        var realTotal = filtered.length;
         var owner = USERS[ownerId];
         if (owner && (owner.profileViewCount || 0) !== realTotal && typeof fsSet === "function") {
           owner.profileViewCount = realTotal;
