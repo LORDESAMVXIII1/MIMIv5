@@ -1573,6 +1573,85 @@
   console.log("📤 Uploads funcionarão via API REST do Cloudinary");
   console.log("🔑 Cloud: " + window.CLOUDINARY_CLOUD_NAME);
 </script>
+<style id="birthday-notification-styles">
+/* 🎂 SISTEMA DE ANIVERSÁRIO — MIMI · Estilo Neon Glam
+   (mesma linguagem visual do brilho neon usado nas cartas de amor) */
+.birthday-modal-overlay {
+  position: fixed; inset: 0; background: rgba(20, 4, 12, 0.78);
+  backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 9999; animation: bdayFadeIn 0.3s ease-out; padding: 20px;
+}
+@keyframes bdayFadeIn { from{opacity:0} to{opacity:1} }
+.birthday-modal-content {
+  position: relative; background: linear-gradient(160deg, #2a0a1e, #180510);
+  border-radius: 24px; padding: 40px 24px; max-width: 420px; width: 100%;
+  color: #fff; border: 1.5px solid #ff5fa8;
+  box-shadow: 0 0 6px rgba(255,95,168,.85), 0 0 18px rgba(255,95,168,.5), 0 0 36px rgba(255,60,140,.3);
+  animation: bdayScaleIn .4s cubic-bezier(.16,1,.3,1), bdayNeonPulse 2.4s ease-in-out infinite;
+}
+@keyframes bdayScaleIn { 0%{opacity:0;transform:scale(.85) translateY(20px)} 100%{opacity:1;transform:scale(1) translateY(0)} }
+@keyframes bdayNeonPulse {
+  0%,100% { box-shadow: 0 0 6px rgba(255,95,168,.85), 0 0 18px rgba(255,95,168,.5), 0 0 36px rgba(255,60,140,.3); }
+  50% { box-shadow: 0 0 10px rgba(255,95,168,1), 0 0 26px rgba(255,95,168,.75), 0 0 48px rgba(255,60,140,.5); }
+}
+.birthday-close-btn {
+  position: absolute; top: 16px; right: 16px; width: 36px; height: 36px; border: none;
+  border-radius: 50%; background: rgba(255,255,255,.12); color: #fff; font-size: 20px;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: all .2s ease; z-index: 10;
+}
+.birthday-close-btn:active { background: rgba(255,255,255,.2); transform: scale(.92); }
+.birthday-header { text-align: center; margin-bottom: 32px; }
+.birthday-title {
+  font-size: 28px; font-weight: 800; color: #ff8fc0;
+  text-shadow: 0 0 12px rgba(255,95,168,.6); margin: 0 0 8px; letter-spacing: -.5px;
+}
+.birthday-subtitle { font-size: 16px; color: #f3d4e2; margin: 0; font-weight: 600; opacity: .9; }
+.birthday-avatars { display: flex; justify-content: center; gap: 16px; margin-bottom: 28px; flex-wrap: wrap; }
+.birthday-avatar-wrap { display: flex; flex-direction: column; align-items: center; gap: 8px; animation: bdayAvatarBounce .6s cubic-bezier(.16,1,.3,1); }
+@keyframes bdayAvatarBounce { 0%{opacity:0;transform:translateY(-20px) scale(.8)} 100%{opacity:1;transform:translateY(0) scale(1)} }
+.birthday-avatar {
+  position: relative; width: 80px; height: 80px; border-radius: 50%; overflow: hidden;
+  border: 3px solid #ff5fa8; box-shadow: 0 0 18px rgba(255,95,168,.6);
+  animation: bdayAvatarGlow 2s ease-in-out infinite;
+}
+@keyframes bdayAvatarGlow { 0%,100%{box-shadow:0 0 18px rgba(255,95,168,.6)} 50%{box-shadow:0 0 28px rgba(255,95,168,.9)} }
+.birthday-avatar-img { width: 100%; height: 100%; object-fit: cover; }
+.birthday-age {
+  position: absolute; bottom: -8px; right: -8px; width: 36px; height: 36px; border-radius: 50%;
+  background: #ff5fa8; color: #1a0e14; display: flex; align-items: center; justify-content: center;
+  font-size: 16px; font-weight: 800; box-shadow: 0 4px 12px rgba(0,0,0,.3); border: 3px solid #180510;
+}
+.birthday-name {
+  font-size: 14px; font-weight: 700; color: #ffd7e8; text-align: center;
+  max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.birthday-message { background: rgba(255,95,168,.1); border-radius: 20px; padding: 20px; margin-bottom: 24px; border: 1px solid rgba(255,95,168,.25); }
+.birthday-msg-text { font-size: 15px; line-height: 1.6; color: #f3d4e2; margin: 0; font-weight: 500; text-align: center; }
+.birthday-actions { display: flex; flex-direction: column; gap: 12px; margin-bottom: 24px; }
+.birthday-btn {
+  padding: 14px 20px; border: none; border-radius: 14px; font-size: 15px; font-weight: 700;
+  cursor: pointer; transition: all .2s ease; display: flex; align-items: center; justify-content: center; gap: 6px;
+}
+.birthday-btn-primary { background: #ff5fa8; color: #1a0e14; box-shadow: 0 0 16px rgba(255,95,168,.5); }
+.birthday-btn-primary:active { transform: scale(.96); box-shadow: 0 0 10px rgba(255,95,168,.4); }
+.birthday-btn-secondary { background: rgba(255,255,255,.08); color: #fff; border: 1.5px solid rgba(255,255,255,.15); }
+.birthday-btn-secondary:active { background: rgba(255,255,255,.14); transform: scale(.96); }
+.birthday-balloons { display: flex; justify-content: center; gap: 12px; margin-top: 20px; }
+.balloon { font-size: 32px; display: inline-block; filter: drop-shadow(0 0 6px rgba(255,95,168,.7)); animation: bdayBalloonFloat 3s ease-in-out infinite; animation-delay: var(--delay); }
+@keyframes bdayBalloonFloat { 0%,100%{transform:translateY(0) rotate(0deg);opacity:.6} 50%{transform:translateY(-16px) rotate(6deg);opacity:1} }
+.birthday-confetti-container { position: absolute; inset: 0; overflow: hidden; pointer-events: none; border-radius: 24px; }
+.confetti-piece { position: absolute; font-size: 24px; line-height: 1; opacity: 1; pointer-events: none; filter: drop-shadow(0 0 4px rgba(255,95,168,.6)); }
+@keyframes confettiFall { 0%{top:-20px;opacity:1;transform:translateY(0) rotate(0deg) scale(1)} 100%{top:100%;opacity:0;transform:translateY(0) rotate(360deg) scale(.3)} }
+@media (max-width: 480px) {
+  .birthday-modal-content { padding: 32px 16px; max-width: calc(100% - 32px); }
+  .birthday-title { font-size: 24px; }
+  .birthday-avatar { width: 72px; height: 72px; }
+  .birthday-balloons { gap: 8px; }
+  .balloon { font-size: 28px; }
+}
+</style>
 </head>
 <body>
 <div id="app"></div>
@@ -2839,33 +2918,33 @@ var USERS = {
     avatar:"https://api.dicebear.com/7.x/avataaars/svg?seed=u999&backgroundColor=ffd6e8",
     cover:null,
     bio:"",
-    location:"", website:"", joined:"Jan 2024",
+    location:"", website:"", joined:"Jan 2024", birthDate:null,
     verified:false, verifiedType:null, subscribedUntil:null, followers:[], following:[],
     books:[] },
   u998: { uid:"u998", name:"Luna Silva", username:"@lunasilva",
     avatar:"https://api.dicebear.com/7.x/avataaars/svg?seed=luna&backgroundColor=ffd6e8",
     cover:null, bio:"🌅 Fotógrafa amadora. Apaixonada por pôr do sol e café.",
-    location:"Rio de Janeiro, RJ", website:"lunasilva.art", joined:"Mar 2023",
+    location:"Rio de Janeiro, RJ", website:"lunasilva.art", joined:"Mar 2023", birthDate:null,
     verified:false, verifiedType:null, subscribedUntil:null, followers:["u999","u997","u996"], following:["u999"], books:[] },
   u997: { uid:"u997", name:"Carlos Tech", username:"@carlostech",
     avatar:"https://api.dicebear.com/7.x/avataaars/svg?seed=carlos&backgroundColor=ffd6e8",
     cover:null, bio:"💻 Dev full-stack. React, Node e café sem açúcar.",
-    location:"São Paulo, SP", website:"carlostech.dev", joined:"Jun 2022",
+    location:"São Paulo, SP", website:"carlostech.dev", joined:"Jun 2022", birthDate:null,
     verified:true, verifiedType:"subscriber", subscribedUntil:"2026-09-01", followers:["u999"], following:["u999","u998","u996"], books:[] },
   u996: { uid:"u996", name:"Ana Vibes", username:"@anavibes",
     avatar:"https://api.dicebear.com/7.x/avataaars/svg?seed=ana&backgroundColor=ffd6e8",
     cover:null, bio:"☕ Produtividade, rotina e boas vibrações.",
-    location:"Belo Horizonte, MG", website:null, joined:"Set 2023",
+    location:"Belo Horizonte, MG", website:null, joined:"Set 2023", birthDate:null,
     verified:false, verifiedType:null, subscribedUntil:null, followers:["u999","u997"], following:["u999","u998"], books:[] },
   u995: { uid:"u995", name:"Pedro Lima", username:"@pedrolima",
     avatar:"https://api.dicebear.com/7.x/avataaars/svg?seed=pedro&backgroundColor=ffd6e8",
     cover:null, bio:"🎮 Streamer nas horas vagas. Vida real nas outras.",
-    location:"Curitiba, PR", website:null, joined:"Nov 2023",
+    location:"Curitiba, PR", website:null, joined:"Nov 2023", birthDate:null,
     verified:false, verifiedType:null, subscribedUntil:null, followers:[], following:["u999"], books:[] },
   u994: { uid:"u994", name:"Sofia Ramos", username:"@sofiaramos",
     avatar:"https://api.dicebear.com/7.x/avataaars/svg?seed=sofia&backgroundColor=ffd6e8",
     cover:null, bio:"🌸 Ilustradora digital. Comissões abertas!",
-    location:"Florianópolis, SC", website:"sofiaramos.art", joined:"Fev 2024",
+    location:"Florianópolis, SC", website:"sofiaramos.art", joined:"Fev 2024", birthDate:null,
     verified:false, verifiedType:null, subscribedUntil:null, followers:[], following:[], books:[] },
 };
 var ME_ID = "u999";
@@ -13129,7 +13208,9 @@ function renderNotifsPage() {
     var avatar = u ? u.avatar : (n._fromAvatar || "https://api.dicebear.com/7.x/avataaars/svg?seed="+(n.userId||"x"));
     html += '<div class="notif-row '+(n.read?"":"unread")+'" data-notif-id="'+n.id+'">' +
       '<div style="position:relative;cursor:pointer;" data-open-author="'+n.userId+'">' + avatarHtml(avatar, 46, false, false, false, null, null, getUserFrame(u)) +
-        '<div class="notif-badge" style="background:'+(colMap[n.type]||C.accent)+';">'+icoSvg(iconMap[n.type]||"bell",11,"#fff")+'</div>' +
+        (n.type === "birthday"
+          ? '<div class="notif-badge" style="background:#ff5fa8;font-size:12px;display:flex;align-items:center;justify-content:center;">🎂</div>'
+          : '<div class="notif-badge" style="background:'+(colMap[n.type]||C.accent)+';">'+icoSvg(iconMap[n.type]||"bell",11,"#fff")+'</div>') +
       '</div>' +
       '<div class="grow" data-open-author="'+n.userId+'" style="cursor:pointer;">' +
         '<span style="font-weight:700;font-size:14px;">'+esc(name)+' </span>' +
@@ -18439,6 +18520,7 @@ function renderEditProfile() {
       '<div class="edit-field" style="position:relative;"><label class="edit-field-label">Bio</label><textarea class="input" style="min-height:70px;resize:vertical;" data-edit-field="bio">'+esc(u.bio||"")+'</textarea><div class="bio-mention-box" data-bio-mention-box></div></div>' +
       '<div class="edit-field"><label class="edit-field-label">Localização</label><input class="input" data-edit-field="location" value="'+esc(u.location||"")+'"></div>' +
       '<div class="edit-field"><label class="edit-field-label">Site</label><input class="input" data-edit-field="website" value="'+esc(u.website||"")+'"></div>' +
+      '<div class="edit-field"><label class="edit-field-label">Data de nascimento</label><input type="date" class="input" data-edit-field="birthDate" value="'+esc(u.birthDate||"")+'"></div>' +
       '<input type="file" data-edit-avatar-input accept="image/*" class="hidden">' +
       '<input type="file" data-edit-cover-input accept="image/*,video/*" class="hidden">' +
     '</div>' +
@@ -18600,11 +18682,13 @@ function bindEditProfile() {
     var bioEl  = appEl.querySelector('[data-edit-field="bio"]');
     var locEl  = appEl.querySelector('[data-edit-field="location"]');
     var webEl  = appEl.querySelector('[data-edit-field="website"]');
+    var bdayEl = appEl.querySelector('[data-edit-field="birthDate"]');
     if (nameEl && nameEl.value.trim()) u.name     = nameEl.value.trim();
     if (userEl && userEl.value.trim()) u.username = userEl.value.trim().replace(/^@?/, "@");
     if (bioEl) u.bio      = bioEl.value.trim();
     if (locEl) u.location = locEl.value.trim();
     if (webEl) u.website  = webEl.value.trim();
+    if (bdayEl) u.birthDate = bdayEl.value || null; // formato ISO: YYYY-MM-DD
     USERS[ME_ID] = u;
     _editingBioField = false;
     state.editProfileOpen = false;
@@ -20197,6 +20281,13 @@ function onAuthSuccess(u) {
   render();
   FB._checkRules();
 
+  // 🎂 Reverifica aniversários agora que os dados reais do usuário chegaram
+  // (o boot inicial roda antes do login terminar, então pode não ver
+  // birthDate ainda).
+  if (typeof BirthdayNotifier !== "undefined") {
+    setTimeout(function () { BirthdayNotifier.checkBirthdays(); }, 1500);
+  }
+
   // ── Seguidores: conserta o campo `followers` a partir da subcoleção
   // followerRefs (fonte de verdade) toda vez que eu autentico — ver
   // comentário em syncMyFollowersFromRefs().
@@ -20249,6 +20340,9 @@ function onAuthSuccess(u) {
       }
     });
     _lastNotifCheck = new Date().toISOString();
+    // 🎂 Devolve a notificação de aniversário (se houver) que essa
+    // recarga do Firestore acabou de apagar do array.
+    if (typeof BirthdayNotifier !== "undefined") BirthdayNotifier.reinjectStoredNotifs();
     renderSoon();
   }).catch(function(){});
   startNotifPolling();
@@ -21540,6 +21634,9 @@ function checkAgeVerificationLinkFromUrl() {
             }
           });
           _lastNotifCheck = new Date().toISOString();
+          // 🎂 Idem: devolve a notificação de aniversário que essa recarga
+          // pode ter apagado.
+          if (typeof BirthdayNotifier !== "undefined") BirthdayNotifier.reinjectStoredNotifs();
           renderSoon();
         }).catch(function(){});
 
@@ -22936,6 +23033,250 @@ render = function() {
   window.addEventListener("touchend", onTouchEnd, { passive:true });
   window.addEventListener("touchcancel", onTouchEnd, { passive:true });
 })();
+</script>
+
+<!-- ═════════════════════════════════════════════════════════════════
+     🎂 SISTEMA DE ANIVERSÁRIO — usa USERS/ME_ID/esc()/openProfile()
+     já existentes no app. Não precisa de configuração extra: o campo
+     "Data de nascimento" já foi adicionado em Editar perfil.
+     ═════════════════════════════════════════════════════════════════ -->
+<script>
+var BirthdayNotifier = (function () {
+  function todayKey() {
+    var t = new Date();
+    return (t.getMonth() + 1) + "-" + t.getDate();
+  }
+  function storageKey() {
+    return "mimi_bday_shown_" + todayKey();
+  }
+  // Guarda o conteúdo das notificações de hoje (não só um "já mostrei"),
+  // pra poder devolvê-las à lista NOTIFS caso o app as apague ao
+  // sincronizar com o Firestore (ver reinjectStoredNotifs).
+  function notifStorageKey() {
+    return "mimi_bday_notifs_" + todayKey();
+  }
+
+  function isBirthdayToday(birthDate) {
+    if (!birthDate) return false;
+    try {
+      var b = new Date(birthDate + "T00:00:00");
+      var t = new Date();
+      return b.getMonth() === t.getMonth() && b.getDate() === t.getDate();
+    } catch (e) { return false; }
+  }
+
+  function calculateAge(birthDate) {
+    try {
+      var b = new Date(birthDate + "T00:00:00");
+      var t = new Date();
+      var age = t.getFullYear() - b.getFullYear();
+      var m = t.getMonth() - b.getMonth();
+      if (m < 0 || (m === 0 && t.getDate() < b.getDate())) age--;
+      return age;
+    } catch (e) { return null; }
+  }
+
+  function collectBirthdaysToday() {
+    var list = [];
+    Object.keys(USERS).forEach(function (uid) {
+      var u = USERS[uid];
+      if (u && u.birthDate && isBirthdayToday(u.birthDate)) {
+        list.push({
+          uid: uid,
+          name: u.name || "Usuário",
+          avatar: u.avatar || ("https://api.dicebear.com/7.x/avataaars/svg?seed=" + uid),
+          isMe: uid === ME_ID,
+          age: calculateAge(u.birthDate)
+        });
+      }
+    });
+    // Garante que "eu" (se fizer aniversário) sempre aparece primeiro.
+    list.sort(function (a, b) { return (b.isMe ? 1 : 0) - (a.isMe ? 1 : 0); });
+    return list;
+  }
+
+  // Insere uma entrada por aniversariante na lista de Notificações (mesmo
+  // array NOTIFS usado por curtida/seguir/comentário) e atualiza o badge
+  // do sininho na navegação — sem usar addNotif() porque ela ignora
+  // fromUserId === ME_ID (aqui o próprio aniversário do usuário é um
+  // caso válido). Também salva o conteúdo em localStorage pra poder
+  // restaurar a notificação caso NOTIFS seja zerado por uma sincronização
+  // com o Firestore (o app faz isso no boot/login — ver reinjectStoredNotifs).
+  function pushToNotifsList(birthdays) {
+    var entries = birthdays.map(function (b) {
+      var text = b.isMe
+        ? "🎉 Hoje é seu aniversário! Parabéns! 💕"
+        : "está fazendo aniversário hoje! 🎂";
+      return {
+        id: (typeof uid === "function") ? uid() : ("bday-" + Date.now() + "-" + b.uid),
+        type: "birthday",
+        userId: b.uid,
+        text: text,
+        time: "agora",
+        read: false
+      };
+    });
+    entries.forEach(function (n) { NOTIFS.unshift(n); });
+    try { localStorage.setItem(notifStorageKey(), JSON.stringify(entries)); } catch (e) {}
+    updateNotifBadge();
+    // Mesmo padrão usado em startNotifPolling(): só força reconstrução da
+    // tela se a pessoa estiver mesmo na aba de Notificações agora — nos
+    // outros casos, o número do sininho já foi atualizado acima e a lista
+    // aparece sozinha na próxima vez que a aba for aberta (sem "piscar" o
+    // resto do app à toa).
+    if (typeof state !== "undefined" && state.page === "notifs" && typeof backgroundRender === "function") {
+      backgroundRender();
+    }
+  }
+
+  function updateNotifBadge() {
+    var badge = document.querySelector(".nav-btn[data-nav='notifs'] .nav-badge");
+    var unread = NOTIFS.filter(function (x) { return !x.read; }).length;
+    if (!badge) {
+      var navBtn = document.querySelector(".nav-btn[data-nav='notifs']");
+      if (navBtn && unread > 0) {
+        var b2 = document.createElement("div");
+        b2.className = "nav-badge";
+        b2.textContent = unread;
+        navBtn.appendChild(b2);
+      }
+    } else {
+      badge.textContent = unread;
+    }
+  }
+
+  // Devolve a(s) notificação(ões) de aniversário de hoje pra lista NOTIFS
+  // caso elas já tenham sido geradas antes (localStorage) mas tenham sumido
+  // do array — sem mostrar o modal de novo e sem duplicar. Chamada depois
+  // de cada ponto do app que zera/recarrega NOTIFS a partir do Firestore.
+  function reinjectStoredNotifs() {
+    try {
+      var raw = localStorage.getItem(notifStorageKey());
+      if (!raw) return;
+      var entries = JSON.parse(raw);
+      if (!entries || !entries.length) return;
+      var changed = false;
+      entries.forEach(function (n) {
+        var already = NOTIFS.some(function (x) { return x.type === "birthday" && x.userId === n.userId; });
+        if (!already) { NOTIFS.unshift(n); changed = true; }
+      });
+      if (changed) {
+        updateNotifBadge();
+        // Mesmo cuidado acima: só reconstrói de verdade se a pessoa
+        // estiver na aba de Notificações. Fora dela, isso ficaria invisível
+        // mesmo assim — não vale o risco de piscar o resto do app.
+        if (typeof state !== "undefined" && state.page === "notifs" && typeof backgroundRender === "function") {
+          backgroundRender();
+        }
+      }
+    } catch (e) { console.warn("BirthdayNotifier:", e); }
+  }
+
+  function checkBirthdays(force) {
+    try {
+      if (!force && localStorage.getItem(storageKey())) return;
+      var birthdays = collectBirthdaysToday();
+      if (!birthdays.length) return;
+      localStorage.setItem(storageKey(), "true");
+      pushToNotifsList(birthdays);
+      showModal(birthdays);
+    } catch (e) { console.warn("BirthdayNotifier:", e); }
+  }
+
+  function animateConfetti(container) {
+    if (!container) return;
+    var pieces = ["🎉","🎊","🎈","🎁","🎂","💕","✨","⭐","🌟","💝"];
+    for (var i = 0; i < 40; i++) {
+      var el = document.createElement("div");
+      el.className = "confetti-piece";
+      el.textContent = pieces[Math.floor(Math.random() * pieces.length)];
+      var x = Math.random() * 100, delay = Math.random() * 0.5, dur = 2 + Math.random(), rot = Math.random() * 360;
+      el.style.cssText = "left:" + x + "%; animation: confettiFall " + dur + "s ease-in " + delay + "s forwards; transform: rotate(" + rot + "deg);";
+      container.appendChild(el);
+    }
+  }
+
+  function showModal(birthdays) {
+    var existing = document.getElementById("birthday-modal");
+    if (existing) existing.remove();
+
+    var isMe = birthdays.length === 1 && birthdays[0].isMe;
+    var subtitle = isMe
+      ? "🎉 É seu aniversário!"
+      : (birthdays.length === 1 ? "🎂 " + esc(birthdays[0].name) + " está fazendo aniversário!" : "🎉 Tem aniversário hoje!");
+    var message = isMe
+      ? "Que este seja um dia especial cheio de alegria, amor e momentos inesquecíveis! 💕"
+      : (birthdays.length === 1
+        ? "Que este seja um dia inesquecível, repleto de sorrisos e celebrações! 🎊"
+        : "Feliz aniversário para todos! Que este seja um dia mágico! ✨");
+
+    var avatarsHtml = birthdays.map(function (b, i) {
+      return '<div class="birthday-avatar-wrap" style="animation-delay:' + (i * 0.1) + 's">' +
+        '<div class="birthday-avatar"><img class="birthday-avatar-img" src="' + esc(b.avatar) + '" alt="' + esc(b.name) + '">' +
+        (b.age != null ? '<span class="birthday-age">' + b.age + '</span>' : '') + '</div>' +
+        '<div class="birthday-name">' + esc(b.name) + '</div></div>';
+    }).join("");
+
+    var sendMsgBtn = (birthdays.length === 1 && !birthdays[0].isMe)
+      ? '<button class="birthday-btn birthday-btn-primary" data-bday-open-profile="' + esc(birthdays[0].uid) + '">Ver perfil 💌</button>'
+      : "";
+
+    var html =
+      '<div class="birthday-modal-overlay" id="birthday-modal">' +
+        '<div class="birthday-modal-content">' +
+          '<button class="birthday-close-btn" data-bday-close>✕</button>' +
+          '<div class="birthday-confetti-container" id="bday-confetti"></div>' +
+          '<div class="birthday-header">' +
+            '<h2 class="birthday-title">' + (isMe ? "🎉 Parabéns!" : "🎂 Aniversário!") + '</h2>' +
+            '<p class="birthday-subtitle">' + subtitle + '</p>' +
+          '</div>' +
+          '<div class="birthday-avatars">' + avatarsHtml + '</div>' +
+          '<div class="birthday-message"><p class="birthday-msg-text">' + message + '</p></div>' +
+          '<div class="birthday-actions">' + sendMsgBtn +
+            '<button class="birthday-btn birthday-btn-secondary" data-bday-close>Fechar</button>' +
+          '</div>' +
+          '<div class="birthday-balloons">' +
+            '<span class="balloon" style="--delay:0s">🎈</span>' +
+            '<span class="balloon" style="--delay:.2s">🎈</span>' +
+            '<span class="balloon" style="--delay:.4s">🎈</span>' +
+            '<span class="balloon" style="--delay:.6s">🎈</span>' +
+            '<span class="balloon" style="--delay:.8s">🎈</span>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+
+    var wrap = document.createElement("div");
+    wrap.innerHTML = html;
+    var modal = wrap.firstElementChild;
+    document.body.appendChild(modal);
+
+    modal.querySelectorAll("[data-bday-close]").forEach(function (btn) {
+      btn.addEventListener("click", function () { modal.remove(); });
+    });
+    var openBtn = modal.querySelector("[data-bday-open-profile]");
+    if (openBtn) {
+      openBtn.addEventListener("click", function () {
+        var uid = openBtn.getAttribute("data-bday-open-profile");
+        modal.remove();
+        if (typeof openProfile === "function") openProfile(uid);
+      });
+    }
+
+    animateConfetti(document.getElementById("bday-confetti"));
+  }
+
+  function init() {
+    // Só verifica no momento em que o app é aberto/carregado — sem
+    // reverificação periódica em segundo plano.
+    checkBirthdays();
+  }
+
+  return { init: init, checkBirthdays: checkBirthdays, reinjectStoredNotifs: reinjectStoredNotifs };
+})();
+
+// Roda a checagem depois do primeiro boot (dá tempo do restoreSession/
+// onAuthSuccess preencherem USERS com os dados reais).
+setTimeout(function () { BirthdayNotifier.init(); }, 2000);
 </script>
 </body>
 </html>
