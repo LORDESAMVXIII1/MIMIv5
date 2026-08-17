@@ -6275,6 +6275,10 @@ var FB = {
         USERS[uid] = USERS[uid] || {};
         Object.assign(USERS[uid], u);
         USERS[uid].uid = uid;
+        // FIX: cadastro grava em "birthdate" (minúsculo), Editar Perfil lê/grava
+        // em "birthDate" — sem isso, quem preencheu a data só no cadastro via
+        // o campo aparecer vazio na edição.
+        if (!USERS[uid].birthDate && USERS[uid].birthdate) USERS[uid].birthDate = USERS[uid].birthdate;
         // FIX: contas criadas antes desta correção não tinham o e-mail
         // salvo no perfil (só existia no token do Firebase), o que
         // quebrava qualquer tela que precisasse confirmar a senha de novo
@@ -18558,7 +18562,7 @@ function renderEditProfile() {
       '<div class="edit-field" style="position:relative;"><label class="edit-field-label">Bio</label><textarea class="input" style="min-height:70px;resize:vertical;" data-edit-field="bio">'+esc(u.bio||"")+'</textarea><div class="bio-mention-box" data-bio-mention-box></div></div>' +
       '<div class="edit-field"><label class="edit-field-label">Localização</label><input class="input" data-edit-field="location" value="'+esc(u.location||"")+'"></div>' +
       '<div class="edit-field"><label class="edit-field-label">Site</label><input class="input" data-edit-field="website" value="'+esc(u.website||"")+'"></div>' +
-      '<div class="edit-field"><label class="edit-field-label">Data de nascimento</label><input type="date" class="input" data-edit-field="birthDate" value="'+esc(u.birthDate||"")+'"></div>' +
+      '<div class="edit-field"><label class="edit-field-label">Data de nascimento</label><input type="date" class="input" data-edit-field="birthDate" max="'+new Date().toISOString().slice(0,10)+'" value="'+esc(u.birthDate||u.birthdate||"")+'"></div>' +
       '<input type="file" data-edit-avatar-input accept="image/*" class="hidden">' +
       '<input type="file" data-edit-cover-input accept="image/*,video/*" class="hidden">' +
     '</div>' +
@@ -18714,6 +18718,7 @@ function bindEditProfile() {
 
   var saveBtn = appEl.querySelector("[data-save-edit]");
   if (saveBtn) saveBtn.addEventListener("click", function() {
+   try {
     var u = ME_obj();
     var nameEl = appEl.querySelector('[data-edit-field="name"]');
     var userEl = appEl.querySelector('[data-edit-field="username"]');
@@ -18726,7 +18731,16 @@ function bindEditProfile() {
     if (bioEl) u.bio      = bioEl.value.trim();
     if (locEl) u.location = locEl.value.trim();
     if (webEl) u.website  = webEl.value.trim();
-    if (bdayEl) u.birthDate = bdayEl.value || null; // formato ISO: YYYY-MM-DD
+    // FIX: o cadastro salva a data em "birthdate" (minúsculo) e essa tela
+    // salvava em "birthDate" (maiúsculo) — dois campos diferentes no banco,
+    // então quem já tinha data salva no cadastro nunca via/editava o valor
+    // certo aqui. Agora grava nos dois nomes pra ficar compatível com quem
+    // já tem dado salvo no formato antigo.
+    if (bdayEl) {
+      var bdayVal = bdayEl.value || null; // formato ISO: YYYY-MM-DD
+      u.birthDate = bdayVal;
+      u.birthdate = bdayVal;
+    }
     USERS[ME_ID] = u;
     _editingBioField = false;
     state.editProfileOpen = false;
@@ -18737,12 +18751,21 @@ function bindEditProfile() {
       Object.keys(u).forEach(function(k){ if (k !== "_id") toSave[k] = u[k]; });
       fsSet("users/"+ME_ID, toSave).then(function(){
         showToast(toastWithIcon("Perfil atualizado!", "success"), true);
-      }).catch(function(){
-        showToast("Erro ao salvar. Tenta novamente.");
+      }).catch(function(err){
+        console.error("Erro ao salvar perfil:", err);
+        showToast("Erro ao salvar: " + ((err && (err.message || err.error)) || "tenta novamente."));
       });
     } else {
       showToast("Perfil atualizado localmente.");
     }
+   } catch (err) {
+    // FIX: antes, qualquer exceção aqui (ex.: elemento inesperado, dado
+    // corrompido) subia sem tratamento — em alguns celulares isso pode
+    // travar/fechar a aba. Agora captura, loga o motivo real no console
+    // e avisa a pessoa em vez de quebrar a tela.
+    console.error("Falha ao salvar perfil (edit profile):", err);
+    showToast("Não deu pra salvar o perfil. Tenta de novo — se persistir, me avisa o que apareceu no console.");
+   }
   });
 }
 
