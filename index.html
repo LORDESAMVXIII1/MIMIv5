@@ -3314,7 +3314,7 @@ function getMyFireToday(p) {
 }
 function postMyFireCount(p) { return getMyFireToday(p).count; }
 function postFireLimitReached(p) {
-  return !isSubscriptionActive(state.user) && postMyFireCount(p) >= FIRE_DAILY_LIMIT;
+  return !isSubscriptionActive(ME_obj()) && postMyFireCount(p) >= FIRE_DAILY_LIMIT;
 }
 // ── 🔥 roxo/lilás — reação de fogo EXCLUSIVA das Vibes ──────────────────
 // Espelha a lógica acima (postFireCount/getMyFireToday/postFireLimitReached)
@@ -3349,7 +3349,7 @@ function getMyVibeFireToday(v) {
 }
 function vibeMyFireCount(v) { return getMyVibeFireToday(v).count; }
 function vibeFireLimitReached(v) {
-  return !isSubscriptionActive(state.user) && vibeMyFireCount(v) >= VIBE_FIRE_DAILY_LIMIT;
+  return !isSubscriptionActive(ME_obj()) && vibeMyFireCount(v) >= VIBE_FIRE_DAILY_LIMIT;
 }
 function postShareCount(p) { return p._shares || 0; }
 
@@ -12305,7 +12305,7 @@ function bindPostCardEvents(root) {
       if (!post) return;
       var url = post.video || post.img;
       if (!url) return;
-      if (isSubscriptionActive(state.user)) {
+      if (isSubscriptionActive(ME_obj())) {
         downloadMedia(url, (post.video ? "video_" : "foto_") + pid);
       } else {
         state.paywallDialog = {
@@ -14123,7 +14123,7 @@ function bindMsgsPage() {
   // 💎 Pacotes com "premium:true" só ficam disponíveis pra quem tem MIMI
   // Plus ativo (mesma checagem usada no resto do app, isSubscriptionActive).
   function stickerPackLocked(pack) {
-    return !!pack.premium && !isSubscriptionActive(state.user);
+    return !!pack.premium && !isSubscriptionActive(ME_obj());
   }
   function renderStickerPanel() {
     var tabs = STICKER_PACKS.map(function(p) {
@@ -22642,7 +22642,7 @@ var VibesModule = {
         var idx = parseInt(btn.getAttribute("data-vibe-idx"));
         var vibe = self.vibes[idx];
         if (!vibe) return;
-        if (isSubscriptionActive(state.user)) {
+        if (isSubscriptionActive(ME_obj())) {
           self.downloadVibe(vibe);
         } else {
           state.confirmDialog = {
