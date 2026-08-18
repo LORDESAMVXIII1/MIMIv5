@@ -2919,7 +2919,7 @@ function showNotifBanner(name, avatar, text) {
   var b = document.createElement("div");
   b.className = "notif-banner";
   b.innerHTML =
-    '<img src="' + esc(avatar) + '" class="notif-banner-avatar" onerror="this.src=\'https://api.dicebear.com/7.x/avataaars/svg?seed=x\'">' +
+    '<img src="' + esc(avatar) + '" class="notif-banner-avatar" onerror="this.src=\'' + DEFAULT_AVATAR + '\'">' +
     '<div class="notif-banner-text"><span class="notif-banner-name">' + esc(name) + '</span> <span class="notif-banner-msg">' + esc(text) + '</span></div>' +
     '<button class="notif-banner-close">&#x2715;</button>';
   document.body.appendChild(b);
@@ -2933,37 +2933,43 @@ function showNotifBanner(name, avatar, text) {
   setTimeout(function() { if (b.parentNode) b.remove(); }, 4000);
 }
 
+// ─── Avatar padrão (silhueta lilás), usado em todo perfil sem foto ──
+// SVG idêntico à imagem de referência: fundo lilás claro (#e2d0e6) com
+// a silhueta em roxo (#8b699c) — cabeça (círculo) + busto (círculo maior
+// cortado pela borda). Substitui os antigos placeholders do dicebear.
+var DEFAULT_AVATAR = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 736 736'%3E%3Crect width='736' height='736' fill='%23e2d0e6'/%3E%3Ccircle cx='374' cy='286' r='154' fill='%238b699c'/%3E%3Ccircle cx='374' cy='767' r='259' fill='%238b699c'/%3E%3C/svg%3E";
+
 // ─── USERS (perfis completos) ─────────────────────────────────
 var USERS = {
   u999: { uid:"u999", name:"Usuário", username:"",
-    avatar:"https://api.dicebear.com/7.x/avataaars/svg?seed=u999&backgroundColor=ffd6e8",
+    avatar:DEFAULT_AVATAR,
     cover:null,
     bio:"",
     location:"", website:"", joined:"Jan 2024", birthDate:null,
     verified:false, verifiedType:null, subscribedUntil:null, followers:[], following:[],
     books:[] },
   u998: { uid:"u998", name:"Luna Silva", username:"@lunasilva",
-    avatar:"https://api.dicebear.com/7.x/avataaars/svg?seed=luna&backgroundColor=ffd6e8",
+    avatar:DEFAULT_AVATAR,
     cover:null, bio:"🌅 Fotógrafa amadora. Apaixonada por pôr do sol e café.",
     location:"Rio de Janeiro, RJ", website:"lunasilva.art", joined:"Mar 2023", birthDate:null,
     verified:false, verifiedType:null, subscribedUntil:null, followers:["u999","u997","u996"], following:["u999"], books:[] },
   u997: { uid:"u997", name:"Carlos Tech", username:"@carlostech",
-    avatar:"https://api.dicebear.com/7.x/avataaars/svg?seed=carlos&backgroundColor=ffd6e8",
+    avatar:DEFAULT_AVATAR,
     cover:null, bio:"💻 Dev full-stack. React, Node e café sem açúcar.",
     location:"São Paulo, SP", website:"carlostech.dev", joined:"Jun 2022", birthDate:null,
     verified:true, verifiedType:"subscriber", subscribedUntil:"2026-09-01", followers:["u999"], following:["u999","u998","u996"], books:[] },
   u996: { uid:"u996", name:"Ana Vibes", username:"@anavibes",
-    avatar:"https://api.dicebear.com/7.x/avataaars/svg?seed=ana&backgroundColor=ffd6e8",
+    avatar:DEFAULT_AVATAR,
     cover:null, bio:"☕ Produtividade, rotina e boas vibrações.",
     location:"Belo Horizonte, MG", website:null, joined:"Set 2023", birthDate:null,
     verified:false, verifiedType:null, subscribedUntil:null, followers:["u999","u997"], following:["u999","u998"], books:[] },
   u995: { uid:"u995", name:"Pedro Lima", username:"@pedrolima",
-    avatar:"https://api.dicebear.com/7.x/avataaars/svg?seed=pedro&backgroundColor=ffd6e8",
+    avatar:DEFAULT_AVATAR,
     cover:null, bio:"🎮 Streamer nas horas vagas. Vida real nas outras.",
     location:"Curitiba, PR", website:null, joined:"Nov 2023", birthDate:null,
     verified:false, verifiedType:null, subscribedUntil:null, followers:[], following:["u999"], books:[] },
   u994: { uid:"u994", name:"Sofia Ramos", username:"@sofiaramos",
-    avatar:"https://api.dicebear.com/7.x/avataaars/svg?seed=sofia&backgroundColor=ffd6e8",
+    avatar:DEFAULT_AVATAR,
     cover:null, bio:"🌸 Ilustradora digital. Comissões abertas!",
     location:"Florianópolis, SC", website:"sofiaramos.art", joined:"Fev 2024", birthDate:null,
     verified:false, verifiedType:null, subscribedUntil:null, followers:[], following:[], books:[] },
@@ -3205,19 +3211,19 @@ function toggleFollow(targetId) {
 
 var STORIES = [
   { ownerId:"u998", seenCount:0, items:[
-    { id:uid(), type:"image", src:"https://api.dicebear.com/7.x/avataaars/svg?seed=luna&backgroundColor=ffd6e8", time:"2h", likes:[], comments:[] }
+    { id:uid(), type:"image", src:DEFAULT_AVATAR, time:"2h", likes:[], comments:[] }
   ]},
   { ownerId:"u997", seenCount:0, items:[
-    { id:uid(), type:"image", src:"https://api.dicebear.com/7.x/avataaars/svg?seed=carlos&backgroundColor=ffd6e8", time:"4h", likes:[], comments:[] }
+    { id:uid(), type:"image", src:DEFAULT_AVATAR, time:"4h", likes:[], comments:[] }
   ]},
   { ownerId:"u996", seenCount:1, items:[
-    { id:uid(), type:"image", src:"https://api.dicebear.com/7.x/avataaars/svg?seed=ana&backgroundColor=ffd6e8", time:"6h", likes:["u999"], comments:[] }
+    { id:uid(), type:"image", src:DEFAULT_AVATAR, time:"6h", likes:["u999"], comments:[] }
   ]},
   { ownerId:"u995", seenCount:1, items:[
-    { id:uid(), type:"image", src:"https://api.dicebear.com/7.x/avataaars/svg?seed=pedro&backgroundColor=ffd6e8", time:"8h", likes:[], comments:[] }
+    { id:uid(), type:"image", src:DEFAULT_AVATAR, time:"8h", likes:[], comments:[] }
   ]},
   { ownerId:"u994", seenCount:0, items:[
-    { id:uid(), type:"image", src:"https://api.dicebear.com/7.x/avataaars/svg?seed=sofia&backgroundColor=ffd6e8", time:"10h", likes:[], comments:[] }
+    { id:uid(), type:"image", src:DEFAULT_AVATAR, time:"10h", likes:[], comments:[] }
   ]},
 ];
 function myStoryEntry() {
@@ -3404,7 +3410,7 @@ function addNotif(type, fromUserId, text, targetUserId) {
   // Banner social no topo
   var fromUser = USERS[fromUserId];
   var uname = fromUser ? fromUser.name : "Alguém";
-  var uavatar = fromUser ? fromUser.avatar : "https://api.dicebear.com/7.x/avataaars/svg?seed=x";
+  var uavatar = fromUser ? fromUser.avatar : DEFAULT_AVATAR;
   showNotifBanner(uname, uavatar, text);
 }
 
@@ -6318,7 +6324,7 @@ var FB = {
         uid:uid, name:name, username:"@"+name.toLowerCase().replace(/\s+/g,""),
         email: email,
         birthdate: birthdate || null,
-        avatar:"https://api.dicebear.com/7.x/avataaars/svg?seed="+uid+"&backgroundColor=ffd6e8",
+        avatar:DEFAULT_AVATAR,
         cover:null, bio:"", location:"", website:"", joined: new Date().toLocaleDateString("pt-BR",{month:"short",year:"numeric"}),
         verified:false, followers:[], following:[]
       };
@@ -6349,7 +6355,7 @@ var FB = {
       var isBrandNew = !(cached && cached.uid === uid);
       var fallbackUser = !isBrandNew ? Object.assign({}, cached) : {
         uid:uid, name:name||"Usuário", username:"@"+(name||"usuario").toLowerCase().replace(/\s+/g,""),
-        avatar:"https://api.dicebear.com/7.x/avataaars/svg?seed="+uid,
+        avatar:DEFAULT_AVATAR,
         cover:null, bio:"", location:"", website:"", joined: new Date().toLocaleDateString("pt-BR",{month:"short",year:"numeric"}),
         verified:false, followers:[], following:[]
       };
@@ -7090,7 +7096,7 @@ var FB = {
     }).then(function(cid) {
       // garante que está na lista local
       if (!CONVOS.find(function(c){ return c.id === cid; })) {
-        var u = USERS[otherUid] || { name: otherUid, username: "", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed="+otherUid };
+        var u = USERS[otherUid] || { name: otherUid, username: "", avatar: DEFAULT_AVATAR };
         CONVOS.unshift({ id: cid, userId: otherUid, last: "", time: "agora", unread: 0, online: false, pinned: false, archived: false });
       }
       return cid;
@@ -8669,13 +8675,13 @@ function startNotifPolling() {
             uid:      doc.fromUid,
             name:     doc.fromName,
             username: "@" + doc.fromName.toLowerCase().replace(/\s+/g,""),
-            avatar:   doc.fromAvatar || "https://api.dicebear.com/7.x/avataaars/svg?seed="+doc.fromUid,
+            avatar:   doc.fromAvatar || DEFAULT_AVATAR,
             verified: false, followers:[], following:[],
           };
         }
 
         // Toast + badge
-        showNotifBanner(doc.fromName||"Alguém", doc.fromAvatar||"https://api.dicebear.com/7.x/avataaars/svg?seed=x", doc.text||"");
+        showNotifBanner(doc.fromName||"Alguém", doc.fromAvatar||DEFAULT_AVATAR, doc.text||"");
         var badge = document.querySelector(".nav-btn[data-nav='notifs'] .nav-badge");
         var unread = NOTIFS.filter(function(x){ return !x.read; }).length;
         if (badge) {
@@ -10373,7 +10379,7 @@ function renderStories() {
   var list = allStoriesList();
   var html = '<div class="stories-wrap">';
   list.forEach(function(s, idx) {
-    var u = USERS[s.ownerId] || { name: "Usuário", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed="+s.ownerId };
+    var u = USERS[s.ownerId] || { name: "Usuário", avatar: DEFAULT_AVATAR };
     if (s.isAd) {
       html += '<div class="story" data-story-ring="'+idx+'">' +
         '<div class="story-ring unseen"><div class="story-ring-inner">' +
@@ -10501,7 +10507,7 @@ function currentStoryOwnerEntry() {
 function renderStoryViewer() {
   var entry = currentStoryOwnerEntry();
   if (!entry || !entry.items.length) { return ""; }
-  var u = USERS[entry.ownerId] || { name: "Usuário", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed="+entry.ownerId };
+  var u = USERS[entry.ownerId] || { name: "Usuário", avatar: DEFAULT_AVATAR };
   var itemIdx = Math.min(state.viewingStoryItemIdx, entry.items.length-1);
   var item = entry.items[itemIdx];
   var isAdStory = !!entry.isAd;
@@ -10861,7 +10867,7 @@ function openStoryComments(initialTab) {
       if (!viewers.length) return '<div class="search-empty">Ninguém viu esse story ainda.</div>';
       return viewers.map(function(v){
         fetchMissingUser(v.uid);
-        var u = USERS[v.uid] || { name:"Usuário", avatar:"https://api.dicebear.com/7.x/avataaars/svg?seed="+v.uid };
+        var u = USERS[v.uid] || { name:"Usuário", avatar:DEFAULT_AVATAR };
         return listRow(u);
       }).join("");
     }
@@ -10869,14 +10875,14 @@ function openStoryComments(initialTab) {
       if (!item.likes.length) return '<div class="search-empty">Nenhuma curtida ainda.</div>';
       return item.likes.map(function(likeUid){
         fetchMissingUser(likeUid);
-        var u = USERS[likeUid] || { name:"Usuário", avatar:"https://api.dicebear.com/7.x/avataaars/svg?seed="+likeUid };
+        var u = USERS[likeUid] || { name:"Usuário", avatar:DEFAULT_AVATAR };
         return listRow(u, icoSvg("heart",16,C.pink,true));
       }).join("");
     }
     if (!item.comments.length) return '<div class="search-empty">Nenhuma resposta ainda.</div>';
     return item.comments.map(function(c) {
       fetchMissingUser(c.authorId);
-      var u = USERS[c.authorId] || { name:"Usuário", avatar:"https://api.dicebear.com/7.x/avataaars/svg?seed="+c.authorId };
+      var u = USERS[c.authorId] || { name:"Usuário", avatar:DEFAULT_AVATAR };
       var isMineReply = c.authorId === ME_ID;
       return '<div class="comment-row" style="padding:0 16px;">' + '<div data-open-author="'+c.authorId+'" style="cursor:pointer;">'+avatarHtml(u.avatar,30,false,false,false,null,null,getUserFrame(u))+'</div>' +
         '<div class="comment-bubble"><span class="comment-user" data-open-author="'+c.authorId+'" style="cursor:pointer;">'+esc(u.name)+' </span>' +
@@ -11819,7 +11825,7 @@ function bindTrackPlayers() {
 // tem seu próprio sistema de curtida/comentário) — o card inteiro é
 // clicável e abre a vibe no player, igual Reels/TikTok fazem no perfil.
 function renderVibeProfileCard(v) {
-  var author = USERS[v.authorId] || { name:"Usuário", username:"@usuario", avatar:"https://api.dicebear.com/7.x/avataaars/svg?seed="+v.authorId, verified:false };
+  var author = USERS[v.authorId] || { name:"Usuário", username:"@usuario", avatar:DEFAULT_AVATAR, verified:false };
   var liked = (v.likedBy||[]).indexOf(ME_ID) !== -1;
   return '<div class="post-card" data-open-vibe="'+v.id+'" style="cursor:pointer;">' +
     '<div class="post-head">' +
@@ -11909,7 +11915,7 @@ function openVibeFromProfile(vibeId) {
 
 function renderPostCard(post, opts) {
   opts = opts || {};
-  var author = USERS[post.authorId] || { name: "Usuário", username: "@usuario", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=" + post.authorId, verified: false };
+  var author = USERS[post.authorId] || { name: "Usuário", username: "@usuario", avatar: DEFAULT_AVATAR, verified: false };
   var mediaHtml = "";
   if (post.video) mediaHtml = renderMimiPlayer(post.video, post.id);
   else if (post.audio) {
@@ -11996,7 +12002,7 @@ var MIMI_PLUS_COMMENT_COLOR = "#ff2e7a"; // magenta vivo, dentro da paleta rosa/
 function renderCommentItem(pid, c, allCmts, isPostOwner, depth) {
   depth = depth || 0;
   var isReply = depth > 0;
-  var u = USERS[c.authorId] || { name: "Usuário", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed="+c.authorId };
+  var u = USERS[c.authorId] || { name: "Usuário", avatar: DEFAULT_AVATAR };
   var liked = commentIsLiked(c);
   var replies = allCmts.filter(function(r){ return r.parentId === c.id; });
   var isPlusComment = isSubscriptionActive(u);
@@ -12449,7 +12455,7 @@ function bindCommentEvents(root) {
       if (!mentionResults.length) { closeMentionBox(); return; }
       mentionBox.innerHTML = mentionResults.map(function(u, i) {
         return '<div class="follow-row bio-mention-item'+(i===mentionActiveIndex?" active":"")+'" data-comment-mention-pick="'+i+'">' +
-          avatarHtml(u.avatar||"https://api.dicebear.com/7.x/avataaars/svg?seed="+u.uid, 32, false, false, false, null, null, getUserFrame(u)) +
+          avatarHtml(u.avatar||DEFAULT_AVATAR, 32, false, false, false, null, null, getUserFrame(u)) +
           '<div class="follow-row-info"><div class="follow-row-name" style="font-size:13px;">'+esc(u.name)+' '+userVerifiedBadge(u,14)+'</div>' +
           '<div class="follow-row-username" style="font-size:12px;">'+esc(u.username||"")+'</div></div></div>';
       }).join("");
@@ -13167,7 +13173,7 @@ function renderSearchResults(q) {
   if (userResults.length) {
     html += '<div class="search-section-title">Perfis</div>';
     userResults.forEach(function(u) {
-      html += '<div class="follow-row" data-open-author="'+(u.uid||u._id)+'">' + avatarHtml(u.avatar||"https://api.dicebear.com/7.x/avataaars/svg?seed="+(u.uid||"x"),46,false,false,false,null,null,getUserFrame(u)) +
+      html += '<div class="follow-row" data-open-author="'+(u.uid||u._id)+'">' + avatarHtml(u.avatar||DEFAULT_AVATAR,46,false,false,false,null,null,getUserFrame(u)) +
         '<div class="follow-row-info"><div class="follow-row-name">'+esc(u.name)+' '+userVerifiedBadge(u,17)+'</div>' +
         '<div class="follow-row-username">'+esc(u.username||"")+'</div></div></div>';
     });
@@ -13175,7 +13181,7 @@ function renderSearchResults(q) {
   if (postResults.length) {
     html += '<div class="search-section-title">Publicações</div>';
     postResults.forEach(function(p) {
-      var author = USERS[p.authorId] || { name: "Utilizador", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=x" };
+      var author = USERS[p.authorId] || { name: "Utilizador", avatar: DEFAULT_AVATAR };
       html += '<div class="follow-row" data-open-post="'+p.id+'">' + avatarHtml(author.avatar,40,false,false,false,null,null,getUserFrame(author)) +
         '<div class="follow-row-info"><div class="follow-row-name">'+esc(author.name)+'</div>' +
         '<div class="follow-row-username" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(p.text||"")+'</div></div></div>';
@@ -13237,7 +13243,7 @@ function renderNotifsPage() {
   NOTIFS.forEach(function(n) {
     var u = USERS[n.userId];
     var name   = u ? u.name   : (n._fromName   || "Alguém");
-    var avatar = u ? u.avatar : (n._fromAvatar || "https://api.dicebear.com/7.x/avataaars/svg?seed="+(n.userId||"x"));
+    var avatar = u ? u.avatar : (n._fromAvatar || DEFAULT_AVATAR);
     html += '<div class="notif-row '+(n.read?"":"unread")+'" data-notif-id="'+n.id+'">' +
       '<div style="position:relative;cursor:pointer;" data-open-author="'+n.userId+'">' + avatarHtml(avatar, 46, false, false, false, null, null, getUserFrame(u)) +
         (n.type === "birthday"
@@ -13355,7 +13361,7 @@ function renderMsgsPage() {
         (state.userSearchResults && state.userSearchResults.length > 0 ?
             state.userSearchResults.map(function(u) {
               return '<div class="follow-row" data-start-convo-inline="'+u.uid+'" style="cursor:pointer;">' +
-                avatarHtml(u.avatar||"https://api.dicebear.com/7.x/avataaars/svg?seed="+u.uid, 42, false, false, false, null, null, getUserFrame(u)) +
+                avatarHtml(u.avatar||DEFAULT_AVATAR, 42, false, false, false, null, null, getUserFrame(u)) +
                 '<div class="follow-row-info">' +
                   '<div class="follow-row-name">'+esc(u.name)+'</div>' +
                   '<div class="follow-row-username">'+esc(u.username)+'</div>' +
@@ -13443,7 +13449,7 @@ function shouldShowReplyPrompt(c) {
 }
 
 function renderConvoRow(c, insideCard) {
-  var u = USERS[c.userId] || { name: c.userId, username: "", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed="+c.userId };
+  var u = USERS[c.userId] || { name: c.userId, username: "", avatar: DEFAULT_AVATAR };
   var isMyTurn = shouldShowReplyPrompt(c);
 
   return '<div class="convo-row" data-open-convo="'+c.id+'" data-convo-id="'+c.id+'" data-convo-longpress="'+c.id+'">' +
@@ -13646,8 +13652,8 @@ function msgAvatarDivHtml(avatarSrc) {
 
 function renderChatMsgCardHtml(m, conv) {
   var isMedia = m.type !== "text";
-  var user = m.me ? ME_obj() : USERS[conv.userId] || { name: "Usuário", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed="+conv.userId };
-  var avatarSrc = user.avatar || "https://api.dicebear.com/7.x/avataaars/svg?seed="+(m.me?ME_ID:conv.userId);
+  var user = m.me ? ME_obj() : USERS[conv.userId] || { name: "Usuário", avatar: DEFAULT_AVATAR };
+  var avatarSrc = user.avatar || DEFAULT_AVATAR;
 
   var html = '<div class="msg-card '+(m.me?"sent":"")+'" data-msg-id="'+esc(m.id)+'" data-msg-element>' +
     '<span class="msg-reply-icon">↩</span>' +
@@ -13691,7 +13697,7 @@ function renderChatMsgCardHtml(m, conv) {
 }
 
 function renderChatView(conv) {
-  var u = USERS[conv.userId] || { name: "Usuário", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed="+conv.userId };
+  var u = USERS[conv.userId] || { name: "Usuário", avatar: DEFAULT_AVATAR };
   var chat = getChat(conv.id);
   var _theme = getChatTheme(conv.id);
   var _themeVars = themeVarsToStyle(_theme.def.vars || {});
@@ -14007,7 +14013,7 @@ function bindMsgsPage() {
     var chatBox = appEl.querySelector("[data-chat-msgs]");
     if (chatBox) {
       var me = ME_obj();
-      var avatarSrc = me.avatar || "https://api.dicebear.com/7.x/avataaars/svg?seed="+ME_ID;
+      var avatarSrc = me.avatar || DEFAULT_AVATAR;
       var avatarIsFp = ImageGateway.isFilePath(avatarSrc);
       var avatarDivAttrs = avatarIsFp ? 'data-bgpath="'+esc(avatarSrc)+'"' : 'style="background-image:url(\''+esc(avatarSrc)+'\');"';
       var msgCard = document.createElement("div");
@@ -14081,7 +14087,7 @@ function bindMsgsPage() {
     var chatBox = appEl.querySelector("[data-chat-msgs]");
     if (chatBox) {
       var me = ME_obj();
-      var avatarSrc = me.avatar || "https://api.dicebear.com/7.x/avataaars/svg?seed="+ME_ID;
+      var avatarSrc = me.avatar || DEFAULT_AVATAR;
       var msgCard = document.createElement("div");
       msgCard.className = "msg-card sent";
       msgCard.setAttribute("data-msg-id", msgId);
@@ -14277,7 +14283,7 @@ function bindMsgsPage() {
     var chatBox = appEl.querySelector("[data-chat-msgs]");
     if (chatBox) {
       var me = ME_obj();
-      var avatarSrc = me.avatar || "https://api.dicebear.com/7.x/avataaars/svg?seed="+ME_ID;
+      var avatarSrc = me.avatar || DEFAULT_AVATAR;
       var msgCard = document.createElement("div");
       msgCard.className = "msg-card sent";
       msgCard.setAttribute("data-msg-id", msgId);
@@ -14383,7 +14389,7 @@ function bindMsgsPage() {
           }
           box.innerHTML = results.map(function(u) {
             return '<div class="follow-row" data-start-convo-inline="'+u.uid+'" style="cursor:pointer;">' +
-              avatarHtml(u.avatar||"https://api.dicebear.com/7.x/avataaars/svg?seed="+u.uid, 42, false, false, false, null, null, getUserFrame(u)) +
+              avatarHtml(u.avatar||DEFAULT_AVATAR, 42, false, false, false, null, null, getUserFrame(u)) +
               '<div class="follow-row-info">' +
                 '<div class="follow-row-name">'+esc(u.name)+'</div>' +
                 '<div class="follow-row-username">'+esc(u.username||"")+'</div>' +
@@ -14664,7 +14670,7 @@ function sendChatMessage() {
   var chatBox = appEl.querySelector("[data-chat-msgs]");
   if (chatBox) {
     var me = ME_obj();
-    var avatarSrc = me.avatar || "https://api.dicebear.com/7.x/avataaars/svg?seed="+ME_ID;
+    var avatarSrc = me.avatar || DEFAULT_AVATAR;
     var msgCard = document.createElement("div");
     msgCard.className = "msg-card sent";
     msgCard.setAttribute("data-msg-id", localId);
@@ -14783,7 +14789,7 @@ function sendLoveLetter(text) {
   var chatBox = appEl.querySelector("[data-chat-msgs]");
   if (chatBox) {
     var me = ME_obj();
-    var avatarSrc = me.avatar || "https://api.dicebear.com/7.x/avataaars/svg?seed="+ME_ID;
+    var avatarSrc = me.avatar || DEFAULT_AVATAR;
     var msgCard = document.createElement("div");
     msgCard.className = "msg-card sent";
     msgCard.setAttribute("data-msg-id", msgId);
@@ -15003,7 +15009,7 @@ function sendMazeInvite() {
   var chatBox = appEl.querySelector("[data-chat-msgs]");
   if (chatBox) {
     var me = ME_obj();
-    var avatarSrc = me.avatar || "https://api.dicebear.com/7.x/avataaars/svg?seed="+ME_ID;
+    var avatarSrc = me.avatar || DEFAULT_AVATAR;
     var msgCard = document.createElement("div");
     msgCard.className = "msg-card sent";
     msgCard.setAttribute("data-msg-id", msgId);
@@ -15540,7 +15546,7 @@ function sendTicTacInvite() {
   var chatBox = appEl.querySelector("[data-chat-msgs]");
   if (chatBox) {
     var me = ME_obj();
-    var avatarSrc = me.avatar || "https://api.dicebear.com/7.x/avataaars/svg?seed="+ME_ID;
+    var avatarSrc = me.avatar || DEFAULT_AVATAR;
     var msgCard = document.createElement("div");
     msgCard.className = "msg-card sent";
     msgCard.setAttribute("data-msg-id", msgId);
@@ -16842,7 +16848,7 @@ function stopCallPolling() {
 
 function renderIncomingCallScreen() {
   var conv = CONVOS.find(function(c){ return c.userId === incomingCall.callerId; });
-  var u = USERS[incomingCall.callerId] || { name:"Alguém", avatar:"https://api.dicebear.com/7.x/avataaars/svg?seed="+incomingCall.callerId };
+  var u = USERS[incomingCall.callerId] || { name:"Alguém", avatar:DEFAULT_AVATAR };
   return '<div class="call-screen fade-in">' +
     '<div class="call-status"><p class="call-sub">Chamada de voz</p></div>' +
     '<div class="call-avatar-wrap">' +
@@ -16937,7 +16943,7 @@ function _acceptIncomingCall() {
 
 function renderCallScreen() {
   var conv = activeCall.conv;
-  var u = USERS[conv.userId] || { name: "Usuário", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed="+conv.userId };
+  var u = USERS[conv.userId] || { name: "Usuário", avatar: DEFAULT_AVATAR };
   var statusText = activeCall.status === "calling" ? "Chamando…" : formatCallTime(activeCall.seconds);
   var topLabel = activeCall.type === "video" ? "CHAMADA DE VÍDEO" : "CHAMADA DE VOZ";
   return '<div class="call-screen fade-in">' +
@@ -17315,7 +17321,7 @@ function renderProfilePage(userId) {
     '<div class="profile-info">' +
       '<div class="profile-header-wrap">' +
         '<div class="profile-top-row">' +
-          '<div class="profile-avatar-wrap" data-view-avatar="'+esc(u.avatar||"")+'" style="cursor:pointer;">'+avatarHtml(u.avatar||"https://api.dicebear.com/7.x/avataaars/svg?seed="+u.uid,72,false,false,showGlow,ringColors,ringThemeKey,getUserFrame(u))+
+          '<div class="profile-avatar-wrap" data-view-avatar="'+esc(u.avatar||"")+'" style="cursor:pointer;">'+avatarHtml(u.avatar||DEFAULT_AVATAR,72,false,false,showGlow,ringColors,ringThemeKey,getUserFrame(u))+
           '</div>' +
           '<div class="profile-actions">' + actionBtns + '</div>' +
         '</div>' +
@@ -18406,7 +18412,7 @@ function renderFollowListPage() {
     html += '<div class="search-empty">'+(f.kind==="followers"?"Ainda sem seguidores.":"Ainda não segue ninguém.")+'</div>';
   } else {
     ids.forEach(function(id) {
-      var person = USERS[id] || { name: id, username: "", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed="+id, verified: false, uid: id };
+      var person = USERS[id] || { name: id, username: "", avatar: DEFAULT_AVATAR, verified: false, uid: id };
       var following = isFollowing(id);
       html += '<div class="follow-row" data-followlist-person="'+id+'">' + avatarHtml(person.avatar,46,false,false,false,null,null,getUserFrame(person)) +
         '<div class="follow-row-info"><div class="follow-row-name">'+esc(person.name)+' '+userVerifiedBadge(person,17)+'</div>' +
@@ -18462,7 +18468,7 @@ function renderProfileViewersBody(ownerId) {
     html += '<div class="search-empty">Ainda ninguém visitou seu perfil.</div>';
   } else {
     viewers.forEach(function(v) {
-      var person = USERS[v.uid] || { name: v.name || "Usuário", username: v.username || "", avatar: v.avatar || "https://api.dicebear.com/7.x/avataaars/svg?seed="+v.uid, uid: v.uid };
+      var person = USERS[v.uid] || { name: v.name || "Usuário", username: v.username || "", avatar: v.avatar || DEFAULT_AVATAR, uid: v.uid };
       html += '<div class="follow-row" data-viewerlist-person="'+v.uid+'">' + avatarHtml(person.avatar,46,false,false,false,null,null,getUserFrame(person)) +
         '<div class="follow-row-info"><div class="follow-row-name">'+esc(person.name)+' '+userVerifiedBadge(person,17)+'</div>' +
         '<div class="follow-row-username">'+esc(person.username)+'</div></div>' +
@@ -18580,7 +18586,7 @@ function renderEditProfile() {
         '<div class="edit-cover-btn" style="opacity:.85;" data-edit-cover-2>'+icoSvg("edit",16,"#fff")+' Trocar capa</div>' +
       '</div>' +
       '<div class="edit-avatar-wrap">' +
-        '<div style="position:relative;">'+avatarHtml(u.avatar||"https://api.dicebear.com/7.x/avataaars/svg?seed="+u.uid,84,false,false,false,null,null,getUserFrame(u)) +
+        '<div style="position:relative;">'+avatarHtml(u.avatar||DEFAULT_AVATAR,84,false,false,false,null,null,getUserFrame(u)) +
         '<button class="edit-avatar-cam" data-edit-avatar-2>'+icoSvg("edit",14,"#fff")+'</button></div>' +
       '</div>' +
       '<div class="edit-field"><label class="edit-field-label">Nome</label><input class="input" data-edit-field="name" value="'+esc(u.name)+'"></div>' +
@@ -18671,7 +18677,7 @@ function bindEditProfile() {
     if (!bioMentionResults.length) { closeBioMentionBox(); return; }
     bioMentionBox.innerHTML = bioMentionResults.map(function(u, i) {
       return '<div class="follow-row bio-mention-item'+(i===bioMentionActiveIndex?" active":"")+'" data-bio-mention-pick="'+i+'">' +
-        avatarHtml(u.avatar||"https://api.dicebear.com/7.x/avataaars/svg?seed="+u.uid, 32, false, false, false, null, null, getUserFrame(u)) +
+        avatarHtml(u.avatar||DEFAULT_AVATAR, 32, false, false, false, null, null, getUserFrame(u)) +
         '<div class="follow-row-info"><div class="follow-row-name" style="font-size:13px;">'+esc(u.name)+' '+userVerifiedBadge(u,14)+'</div>' +
         '<div class="follow-row-username" style="font-size:12px;">'+esc(u.username||"")+'</div></div></div>';
     }).join("");
@@ -20421,7 +20427,7 @@ function onAuthSuccess(u) {
         USERS[doc.fromUid] = {
           uid: doc.fromUid, name: doc.fromName,
           username: "@" + doc.fromName.toLowerCase().replace(/\s+/g,""),
-          avatar: doc.fromAvatar || "https://api.dicebear.com/7.x/avataaars/svg?seed="+doc.fromUid,
+          avatar: doc.fromAvatar || DEFAULT_AVATAR,
           verified:false, followers:[], following:[],
         };
       }
@@ -21551,7 +21557,7 @@ function checkAgeVerificationLinkFromUrl() {
   var safetyTimeout = setTimeout(function() {
     console.warn("⏱️ Timeout na inicialização (30s) - forçando renderização do app");
     if (!state.user) {
-      state.user = { uid: "demo", name: "Usuário", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=demo", email: "demo@mimi.app" };
+      state.user = { uid: "demo", name: "Usuário", avatar: DEFAULT_AVATAR, email: "demo@mimi.app" };
     }
     render();
   }, 30000);
@@ -21715,7 +21721,7 @@ function checkAgeVerificationLinkFromUrl() {
               USERS[doc.fromUid] = {
                 uid: doc.fromUid, name: doc.fromName,
                 username: "@" + doc.fromName.toLowerCase().replace(/\s+/g,""),
-                avatar: doc.fromAvatar || "https://api.dicebear.com/7.x/avataaars/svg?seed="+doc.fromUid,
+                avatar: doc.fromAvatar || DEFAULT_AVATAR,
                 verified:false, followers:[], following:[],
               };
             }
@@ -22289,7 +22295,7 @@ var VibesModule = {
 
   // Anúncio renderizado como um slide de Vibe (sem fogo e sem download).
   renderAdSlide: function(ad) {
-    var au = USERS[ad.authorId] || { name:"MIMI", avatar:"https://api.dicebear.com/7.x/avataaars/svg?seed="+ad.authorId };
+    var au = USERS[ad.authorId] || { name:"MIMI", avatar:DEFAULT_AVATAR };
     var videoStyle = 'position:absolute;inset:0;width:100%;height:100%;max-width:100%;max-height:100%;object-fit:cover;background:#000;display:block;';
     // FIX: imagens de anúncio (formato Feed, quadrado/paisagem) estavam sendo
     // esticadas com object-fit:cover dentro do slide vertical de tela cheia
@@ -22360,7 +22366,7 @@ var VibesModule = {
         }
         var vUser = USERS[vibe.userId];
         if (!vUser && vibe.userId) self.fetchMissingUser(vibe.userId);
-        var vAvatar = (vUser && vUser.avatar) || vibe.avatar || ("https://api.dicebear.com/7.x/avataaars/svg?seed=" + (vibe.userId || vibe.username));
+        var vAvatar = (vUser && vUser.avatar) || vibe.avatar || (DEFAULT_AVATAR);
         var vFrame = vUser ? getUserFrame(vUser) : null;
         var optimizedVideoUrl = optimizeCloudinaryVideoUrl(vibe.videoUrl);
         var isNearVibe = (idx === activeVibeIdx || idx === activeVibeIdx + 1);
@@ -22516,7 +22522,7 @@ var VibesModule = {
       listHtml = '<div class="vibe-comments-empty">Seja o primeiro a comentar! 🎀</div>';
     } else {
       cmts.forEach(function(c) {
-        var u = USERS[c.authorId] || { name:"Usuário", avatar:"https://api.dicebear.com/7.x/avataaars/svg?seed="+c.authorId };
+        var u = USERS[c.authorId] || { name:"Usuário", avatar:DEFAULT_AVATAR };
         var liked = commentIsLiked(c);
         listHtml += '<div class="vibe-comment-row">' +
           avatarHtml(u.avatar, 32, false, false, false, null, null, getUserFrame(u)) +
@@ -23169,7 +23175,7 @@ var BirthdayNotifier = (function () {
         list.push({
           uid: uid,
           name: u.name || "Usuário",
-          avatar: u.avatar || ("https://api.dicebear.com/7.x/avataaars/svg?seed=" + uid),
+          avatar: u.avatar || (DEFAULT_AVATAR),
           isMe: uid === ME_ID,
           age: calculateAge(u.birthDate)
         });
