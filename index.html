@@ -1405,6 +1405,7 @@
   .confirm-overlay { position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:360; display:flex; align-items:center; justify-content:center; max-width:480px; margin:0 auto; padding:24px; }
   .confirm-box { background:var(--surface); border-radius:20px; padding:22px 20px; width:100%; max-width:320px; text-align:center; }
   .confirm-title { font-weight:800; font-size:16px; margin:0 0 8px; }
+  .confirm-title-icon { display:inline-flex; vertical-align:-3px; margin-right:6px; color:#FF9A3D; }
   .confirm-text { font-size:13.5px; color:var(--sub); margin:0 0 18px; line-height:1.5; }
   .confirm-actions { display:flex; gap:10px; }
   .confirm-actions .btn { flex:1; }
@@ -12997,7 +12998,7 @@ function renderConfirmDialog() {
   if (!d) return "";
   return '<div class="confirm-overlay fade-in" data-confirm-overlay>' +
     '<div class="confirm-box">' +
-      '<p class="confirm-title">'+esc(d.title)+'</p>' +
+      '<p class="confirm-title">'+(d.icon?'<span class="confirm-title-icon">'+mimiPlusIcon(d.icon,18)+'</span>':'')+esc(d.title)+'</p>' +
       '<p class="confirm-text">'+esc(d.text)+'</p>' +
       '<div class="confirm-actions">' +
         '<button class="btn btn-secondary" data-confirm-cancel>Cancelar</button>' +
@@ -22645,7 +22646,8 @@ var VibesModule = {
           self.downloadVibe(vibe);
         } else {
           state.confirmDialog = {
-            title: "Recurso exclusivo MIMI Plus 👑",
+            title: "Recurso exclusivo MIMI Plus",
+            icon: "crown",
             text: "Baixar vídeos é um benefício para assinantes. Assine o MIMI Plus para poder salvar essa vibe no seu dispositivo.",
             confirmLabel: "Assinar MIMI Plus",
             danger: false,
@@ -23132,14 +23134,20 @@ var BirthdayNotifier = (function () {
     var t = new Date();
     return (t.getMonth() + 1) + "-" + t.getDate();
   }
+  // FIX (conta errada vendo aniversário de outra conta): antes essas chaves
+  // eram só por DATA, sem saber de qual conta é — como o localStorage é do
+  // navegador (compartilhado entre todas as contas testadas no mesmo
+  // celular), a primeira conta que via o aviso no dia "consumia" o aviso
+  // pra todo mundo, e a notificação salva dela vazava pras outras contas
+  // que abrissem o app depois. Agora inclui o ME_ID.
   function storageKey() {
-    return "mimi_bday_shown_" + todayKey();
+    return "mimi_bday_shown_" + todayKey() + "_" + (ME_ID || "anon");
   }
   // Guarda o conteúdo das notificações de hoje (não só um "já mostrei"),
   // pra poder devolvê-las à lista NOTIFS caso o app as apague ao
   // sincronizar com o Firestore (ver reinjectStoredNotifs).
   function notifStorageKey() {
-    return "mimi_bday_notifs_" + todayKey();
+    return "mimi_bday_notifs_" + todayKey() + "_" + (ME_ID || "anon");
   }
 
   function calculateAge(birthDate) {
