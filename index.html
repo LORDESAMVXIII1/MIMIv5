@@ -1575,6 +1575,103 @@
   console.log("📤 Uploads funcionarão via API REST do Cloudinary");
   console.log("🔑 Cloud: " + window.CLOUDINARY_CLOUD_NAME);
 </script>
+
+<!-- ============================================================
+     🩺 SENTRY — rastreio de erros em produção
+     ------------------------------------------------------------
+     ANTES DE USAR: troque MIMI_SENTRY_DSN abaixo pelo DSN do seu
+     projeto Sentry (crie uma conta grátis em sentry.io > Projects
+     > Create Project > escolha "Browser JavaScript"). O DSN é uma
+     chave pública de ESCRITA — é normal e seguro deixá-la visível
+     no código do front-end, o Sentry foi projetado para isso.
+
+     O que isso ativa:
+     - Captura automática de erros não tratados (window.onerror)
+       e promises rejeitadas sem catch (unhandledrejection).
+     - Todo console.error(...) que já existe no app (são ~105
+       chamadas espalhadas pelo código) passa a ser enviado pro
+       Sentry também, sem precisar tocar em cada uma.
+     - breadcrumbs automáticos (cliques, navegação, fetch/XHR) pra
+       reconstruir o que o usuário fez antes do erro acontecer.
+     - Se o app tiver um usuário logado, chame
+       window.MimiErrorTracking.setUser({ id, email }) depois do
+       login pra saber DE QUEM foi o erro (ver instruções no fim
+       deste bloco).
+     ============================================================ -->
+<script src="https://browser.sentry-cdn.com/7.120.3/bundle.tracing.min.js" crossorigin="anonymous"></script>
+<script>
+(function () {
+  var MIMI_SENTRY_DSN = "https://8eda1f6e59207291ce8adf0156b1d300@o4511942859423744.ingest.us.sentry.io/4511942885441536";
+
+  if (!window.Sentry) {
+    console.warn("⚠️ Sentry não carregou (CDN bloqueado/offline). Rastreio de erros desativado nesta sessão.");
+    window.MimiErrorTracking = { setUser: function () {}, capture: function () {} };
+    return;
+  }
+
+  if (MIMI_SENTRY_DSN.indexOf("COLOQUE_AQUI") === 0) {
+    console.warn("⚠️ Sentry carregado mas SEM DSN configurado — edite MIMI_SENTRY_DSN no <head> do index.html. Rastreio de erros está DESLIGADO até isso ser feito.");
+    window.MimiErrorTracking = { setUser: function () {}, capture: function () {} };
+    return;
+  }
+
+  Sentry.init({
+    dsn: MIMI_SENTRY_DSN,
+    environment: (location.hostname === "localhost" || location.hostname === "127.0.0.1") ? "development" : "production",
+    // Amostragem de performance/traces baixa de propósito — o objetivo aqui
+    // é capturar ERROS, não instrumentar performance a fundo. Suba esse
+    // número (até 1.0) só se quiser investigar lentidão também.
+    tracesSampleRate: 0.1,
+    // Deploy é feito publicando o HTML direto (GitHub Pages, sem hash de
+    // build), então não dá pra usar um release id automático de commit
+    // aqui sem mexer no fluxo de publicação — deixado fixo por enquanto.
+    release: "mimi-app@manual",
+    beforeSend: function (event) {
+      // Evita mandar ruído de extensões de navegador / bloqueadores de anúncio,
+      // que geram muito lixo e não são bugs do MIMI.
+      var msg = (event.exception && event.exception.values && event.exception.values[0] && event.exception.values[0].value) || "";
+      if (/extension:\/\//.test(msg) || /chrome-extension/.test(msg)) return null;
+      return event;
+    }
+  });
+
+  // Sobrescreve console.error para também mandar pro Sentry, sem precisar
+  // editar as ~105 chamadas de console.error já existentes no app.
+  var _originalConsoleError = console.error;
+  console.error = function () {
+    _originalConsoleError.apply(console, arguments);
+    try {
+      var args = Array.prototype.slice.call(arguments);
+      var firstErr = args.filter(function (a) { return a instanceof Error; })[0];
+      if (firstErr) {
+        Sentry.captureException(firstErr, { extra: { consoleArgs: args.map(String) } });
+      } else {
+        Sentry.captureMessage(args.map(function (a) {
+          return (typeof a === "string") ? a : JSON.stringify(a);
+        }).join(" "), "error");
+      }
+    } catch (e) { /* nunca deixa o rastreio de erro quebrar o app */ }
+  };
+
+  // API simples pro resto do app usar. Chame:
+  //   window.MimiErrorTracking.setUser({ id: user.uid, email: user.email })
+  // logo depois de um login bem-sucedido (e com { id: null } no logout),
+  // e opcionalmente:
+  //   window.MimiErrorTracking.capture(erro, { onde: "upload de foto" })
+  // em qualquer catch(erro) que você já tenha no código, pra anotar contexto.
+  window.MimiErrorTracking = {
+    setUser: function (user) {
+      Sentry.setUser(user && user.id ? { id: String(user.id), email: user.email || undefined } : null);
+    },
+    capture: function (error, extraContext) {
+      Sentry.captureException(error, extraContext ? { extra: extraContext } : undefined);
+    }
+  };
+
+  console.log("🩺 Sentry ativo — erros do app agora são reportados.");
+})();
+</script>
+
 <style id="birthday-notification-styles">
 /* 🎂 SISTEMA DE ANIVERSÁRIO — MIMI · Estilo Neon Glam
    (mesma linguagem visual do brilho neon usado nas cartas de amor) */
