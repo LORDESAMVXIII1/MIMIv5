@@ -4011,7 +4011,7 @@ var CFG = {
 // Lê /config/app no Firestore (leitura pública) logo no boot. Se
 // maintenanceMode=true OU a versão deste arquivo < minVersion, bloqueia
 // a tela — sem depender de re-upload no GitHub Pages.
-var APP_VERSION = "2026.08.20.7";
+var APP_VERSION = "2026.08.20.8";
 
 // ─── AUTO-ATUALIZAÇÃO ───────────────────────────────────────
 // Problema antigo: depois de subir um index.html novo no GitHub Pages,
@@ -9248,7 +9248,12 @@ function loadChatMessagesNow() {
     }
     _mergeIncomingMessages(_convoIdAtRequest, msgs);
   }).catch(function(err){
-    console.error("Erro ao carregar mensagens:", err);
+    // FIX: esse timeout de 8s é uma soneca de rede ESPERADA no polling de
+    // mensagens (já tem retry automático logo abaixo) — não é um bug.
+    // console.error aqui virava "Error" no Sentry toda vez que a rede
+    // atrasava um pouco, poluindo os issues com um caso já tratado.
+    // console.warn não é interceptado pelo hook global do Sentry.
+    console.warn("Erro ao carregar mensagens (retry automático em 5s):", err);
     // Tentar novamente em 5s
     setTimeout(loadChatMessagesNow, 5000);
   });
