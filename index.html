@@ -1760,7 +1760,6 @@
 </style>
 </head>
 <body>
-<div id="mimi-teste-update-badge" style="position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:2147483647;background:#22c55e;color:#fff;padding:6px 14px;border-radius:999px;font-size:12px;font-weight:700;box-shadow:0 4px 12px rgba(0,0,0,.3);">TESTE ATUALIZAÇÃO — v2</div>
 <div id="app"></div>
 
 <div id="mimi-splash">
@@ -4012,7 +4011,7 @@ var CFG = {
 // Lê /config/app no Firestore (leitura pública) logo no boot. Se
 // maintenanceMode=true OU a versão deste arquivo < minVersion, bloqueia
 // a tela — sem depender de re-upload no GitHub Pages.
-var APP_VERSION = "2026.08.20.2";
+var APP_VERSION = "2026.08.20.5";
 
 // ─── AUTO-ATUALIZAÇÃO ───────────────────────────────────────
 // Problema antigo: depois de subir um index.html novo no GitHub Pages,
@@ -4042,9 +4041,46 @@ var APP_VERSION = "2026.08.20.2";
     document.body.appendChild(t);
   }
 
+  // Evita recarregar bem no meio de uma ação do usuário (digitando uma
+  // mensagem, enviando foto/áudio, gravando áudio) — nesses casos, adia
+  // o reload e vai checando de novo até ficar seguro. Tem um limite de
+  // segurança pra não ficar preso pra sempre na versão antiga.
+  function isSensitiveActionInProgress() {
+    try {
+      if (typeof _imgUploadBusy !== "undefined" && _imgUploadBusy) return true;
+    } catch (e) {}
+    try {
+      if (typeof mediaRecorder !== "undefined" && mediaRecorder && mediaRecorder.state === "recording") return true;
+    } catch (e) {}
+    try {
+      var ae = document.activeElement;
+      if (ae) {
+        var isTextField = ae.tagName === "TEXTAREA" ||
+          (ae.tagName === "INPUT" && (!ae.type || ae.type === "text" || ae.type === "search"));
+        if (isTextField && ae.value && ae.value.trim().length > 0) return true;
+      }
+    } catch (e) {}
+    return false;
+  }
+
   function applyUpdate(remoteVersion) {
     if (updating) return;
     updating = true;
+    waitThenApply(remoteVersion, 0);
+  }
+
+  var WAIT_RETRY_MS = 3000;
+  var WAIT_MAX_TRIES = 100; // ~5 min de tolerância; depois disso, aplica de qualquer jeito
+
+  function waitThenApply(remoteVersion, attempt) {
+    if (isSensitiveActionInProgress() && attempt < WAIT_MAX_TRIES) {
+      setTimeout(function () { waitThenApply(remoteVersion, attempt + 1); }, WAIT_RETRY_MS);
+      return;
+    }
+    doApplyUpdate(remoteVersion);
+  }
+
+  function doApplyUpdate(remoteVersion) {
     showUpdatingToast();
     var jobs = [];
     try {
@@ -7639,6 +7675,48 @@ var FB = {
     });
   },
 
+  // Lista de usuários da plataforma (só o dono do app usa — a tela
+  // "Usuários da plataforma" nas Configurações). Segue o mesmo caminho da
+  // Central de Moderação: tenta o espelho no Supabase e, se ele recusar,
+  // cai pro Firebase. Só roda quando a tela é aberta — nada disso pesa no
+  // boot nem nos pollings normais do app.
+  loadAllUsers: function() {
+    if (!_idToken) return Promise.resolve([]);
+    function loadRaw() {
+      return fsList("users").catch(function(errSb) {
+        return _fsListFirebase("users").catch(function(errFb) {
+          var m1 = (errSb && errSb.message) || String(errSb || "erro");
+          var m2 = (errFb && (errFb.message || errFb.status)) || String(errFb || "erro");
+          throw new Error("Supabase (fs-gateway) recusou a lista de usuários (" + m1 + ") e o Firebase também (" + m2 + ").");
+        });
+      });
+    }
+    return loadRaw().then(function(docs) {
+      return (docs || []).map(function(d) {
+        var id = d._id;
+        var u = {
+          uid: id,
+          name: d.name || "Sem nome",
+          username: d.username || "",
+          email: d.email || "",
+          avatar: d.avatar || DEFAULT_AVATAR,
+          verified: !!d.verified,
+          verifiedType: d.verifiedType || null,
+          subscribedUntil: d.subscribedUntil || null,
+          ageVerified: !!d.ageVerified,
+          followersCount: Array.isArray(d.followers) ? d.followers.length : (d.followerCount || 0),
+          createdAt: d.createdAt || d.joinedAt || null,
+          lastSeen: d.lastSeen || null
+        };
+        // Mantém o cache local em dia sem sobrescrever nada que já exista
+        if (id && !USERS[id]) USERS[id] = Object.assign({}, u);
+        return u;
+      }).sort(function(a, b) {
+        return String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
+      });
+    });
+  },
+
   reportPost: function(postId, targetAuthorId, postText) {
     if (!_idToken || !_fbUid) return Promise.reject("Not authenticated");
     var id = uid();
@@ -9609,6 +9687,7 @@ var state = {
   supportOpen: false,
   myAdsOpen: false, // tela privada "Meus Anúncios"
   moderationPanelOpen: false, // tela privada "Central de Moderação" (só o dono do app)
+  usersPanelOpen: false, // tela privada "Usuários da plataforma" (só o dono do app)
   searchQuery: "",
   replyTarget: null,
   userSearchOpen: false,
@@ -10175,6 +10254,7 @@ function _renderImpl() {
   if (state.profileViewersFor) html += renderProfileViewersPage();
   if (state.myAdsOpen) html += renderMyAdsPage();
   if (state.moderationPanelOpen) html += renderModerationPage();
+  if (state.usersPanelOpen) html += renderUsersPanelPage();
   if (state.publishMenu) html += renderPublishMenu();
   if (state.creating) html += renderCreatePost();
   if (musicSearch.open) html += renderMusicSearchModal();
@@ -10233,6 +10313,7 @@ function _renderImpl() {
   if (state.profileViewersFor) bindProfileViewersPage();
   if (state.myAdsOpen) bindMyAdsPage();
   if (state.moderationPanelOpen) bindModerationPage();
+  if (state.usersPanelOpen) bindUsersPanelPage();
   if (state.publishMenu) bindPublishMenu();
   if (state.creating) bindCreatePost();
   if (musicSearch.open) bindMusicSearchModal();
@@ -11185,6 +11266,7 @@ function hasOpenOverlay() {
     activeCall || incomingCall || state.actionSheetPostId || state.profileSheetUserId ||
     state.confirmDialog || state.paywallDialog || state.addBooksSheetOpen || state.bookPicker ||
     state.isbnScanOpen || state.bookAddDraft || state.bookActionFor || state.moderationPanelOpen ||
+    state.usersPanelOpen ||
     state.booksPageFor ||
     document.querySelector("[data-story-comments-panel]")
   );
@@ -18486,6 +18568,139 @@ function bindModerationPage() {
   });
 }
 
+// ── Usuários da plataforma (só o dono do app) ────────────────────────────
+// Lista simples de TODAS as contas do MIMI, com busca por nome/@/e-mail.
+// Carrega uma única vez, sob demanda (só quando a tela é aberta), e fica
+// em memória — não entra em nenhum polling, então não pesa no app.
+var UsersPanelModule = {
+  users: [],
+  loading: false,
+  loaded: false,
+  error: null,
+  query: "",
+  limit: 50,
+  load: function() {
+    if (this.loading) return;
+    this.loading = true;
+    this.error = null;
+    var self = this;
+    FB.loadAllUsers().then(function(list) {
+      self.users = list;
+      self.loaded = true;
+      self.loading = false;
+      render();
+    }).catch(function(err) {
+      console.error("Erro ao carregar usuários da plataforma:", err);
+      self.error = (err && err.message) ? err.message : String(err);
+      self.loading = false;
+      render();
+    });
+  },
+  filtered: function() {
+    var q = (this.query || "").trim().toLowerCase().replace(/^@/, "");
+    if (!q) return this.users;
+    return this.users.filter(function(u) {
+      return (u.name || "").toLowerCase().indexOf(q) !== -1 ||
+             (u.username || "").toLowerCase().replace(/^@/, "").indexOf(q) !== -1 ||
+             (u.email || "").toLowerCase().indexOf(q) !== -1 ||
+             (u.uid || "").toLowerCase().indexOf(q) !== -1;
+    });
+  }
+};
+
+function renderUsersPanelPage() {
+  var m = UsersPanelModule;
+  var html = '<div class="create-overlay fade-in" style="z-index:220;">' +
+    '<div class="create-header">' +
+      '<button class="icon-btn" data-close-users-panel style="color:var(--sub);">'+icoSvg("back",22)+'</button>' +
+      '<span style="font-weight:800;font-size:16px;">Usuários da plataforma</span>' +
+      '<span style="width:22px;"></span>' +
+    '</div>' +
+    '<div class="create-body" style="padding:14px;">';
+
+  if (!m.loaded && m.loading) {
+    html += '<div class="search-empty">Carregando…</div></div></div>';
+    return html;
+  }
+
+  if (m.error) {
+    html += '<div class="search-empty" style="color:#e0507a;">Não foi possível carregar: '+esc(m.error)+'</div>' +
+      '<div style="text-align:center;margin-top:10px;"><button class="btn btn-sm btn-secondary" data-users-retry>Tentar novamente</button></div></div></div>';
+    return html;
+  }
+
+  var all = m.users;
+  var list = m.filtered();
+  var verified = all.filter(function(u){ return u.verified; }).length;
+
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">' +
+      _modMetricCard("Contas no app", all.length) +
+      _modMetricCard("Verificadas", verified) +
+    '</div>' +
+    '<input class="input" data-users-search type="search" placeholder="Buscar por nome, @usuário ou e-mail" value="'+esc(m.query)+'" style="width:100%;margin-bottom:12px;" />';
+
+  if (!list.length) {
+    html += '<div class="search-empty">Nenhum usuário encontrado.</div>';
+  } else {
+    var shown = list.slice(0, m.limit);
+    shown.forEach(function(u) {
+      var sub = (u.username ? esc(u.username.charAt(0) === "@" ? u.username : "@" + u.username) : "sem @") +
+        (u.email ? " · " + esc(u.email) : "") +
+        (u.createdAt ? " · entrou em " + esc(new Date(u.createdAt).toLocaleDateString("pt-BR")) : "");
+      html += '<div class="cfg-item" data-users-open="'+esc(u.uid)+'" style="cursor:pointer;align-items:center;gap:10px;">' +
+        '<img src="'+esc(u.avatar || DEFAULT_AVATAR)+'" alt="" style="width:38px;height:38px;border-radius:50%;object-fit:cover;flex:none;" />' +
+        '<div class="grow" style="min-width:0;">' +
+          '<div class="cfg-item-label" style="display:flex;align-items:center;gap:4px;">'+esc(u.name)+
+            (u.verified ? '<span style="display:inline-flex;vertical-align:-2px;">'+icoSvg("check",13,"#2ecc71")+'</span>' : '')+'</div>' +
+          '<div class="cfg-item-sub" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+sub+'</div>' +
+        '</div>' +
+      '</div>';
+    });
+    if (list.length > m.limit) {
+      html += '<div style="text-align:center;margin-top:10px;"><button class="btn btn-sm btn-secondary" data-users-more>Mostrar mais ('+(list.length - m.limit)+')</button></div>';
+    }
+  }
+
+  html += '</div></div>';
+  return html;
+}
+
+function bindUsersPanelPage() {
+  var closeBtn = appEl.querySelector("[data-close-users-panel]");
+  if (closeBtn) closeBtn.addEventListener("click", function() {
+    state.usersPanelOpen = false;
+    render();
+  });
+
+  if (!UsersPanelModule.loaded && !UsersPanelModule.loading && !UsersPanelModule.error) UsersPanelModule.load();
+
+  var retryBtn = appEl.querySelector("[data-users-retry]");
+  if (retryBtn) retryBtn.addEventListener("click", function() { UsersPanelModule.load(); });
+
+  var searchEl = appEl.querySelector("[data-users-search]");
+  if (searchEl) searchEl.addEventListener("input", function() {
+    UsersPanelModule.query = searchEl.value;
+    UsersPanelModule.limit = 50;
+    render();
+  });
+
+  var moreBtn = appEl.querySelector("[data-users-more]");
+  if (moreBtn) moreBtn.addEventListener("click", function() {
+    UsersPanelModule.limit += 50;
+    render();
+  });
+
+  appEl.querySelectorAll("[data-users-open]").forEach(function(row) {
+    row.addEventListener("click", function() {
+      var id = row.getAttribute("data-users-open");
+      if (!id) return;
+      state.usersPanelOpen = false;
+      openProfile(id);
+      render();
+    });
+  });
+}
+
 function renderMyAdsPage() {
   var myAds = posts.filter(function(p){ return p.authorId === ME_ID && p.isAd; });
   var html = '<div class="create-overlay fade-in" style="z-index:220;">' +
@@ -19963,6 +20178,14 @@ function renderSettingsPage() {
         '<div class="cfg-item-sub">Denúncias pendentes e números de engajamento acumulado</div>' +
       '</div>' +
       icoSvg("share",16,"var(--muted)") +
+    '</div>' +
+    '<div class="cfg-item" data-open-users-panel style="cursor:pointer;">' +
+      '<div class="cfg-item-icon" style="background:#fff0f6;">'+icoSvg("user",20,C.accent)+'</div>' +
+      '<div class="grow">' +
+        '<div class="cfg-item-label">Usuários da plataforma</div>' +
+        '<div class="cfg-item-sub">Ver todas as contas do MIMI, com busca por nome, @ ou e-mail</div>' +
+      '</div>' +
+      icoSvg("share",16,"var(--muted)") +
     '</div>'
   : "") +
 
@@ -20021,6 +20244,13 @@ function bindSettingsPage() {
   var openModerationBtn = appEl.querySelector("[data-open-moderation-panel]");
   if (openModerationBtn) openModerationBtn.addEventListener("click", function() {
     state.moderationPanelOpen = true;
+    render();
+  });
+
+  var openUsersPanelBtn = appEl.querySelector("[data-open-users-panel]");
+  if (openUsersPanelBtn) openUsersPanelBtn.addEventListener("click", function() {
+    if (!isAppOwner(ME_obj())) return; // trava extra: só o dono abre
+    state.usersPanelOpen = true;
     render();
   });
 
