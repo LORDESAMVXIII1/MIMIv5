@@ -1634,6 +1634,14 @@
       // que geram muito lixo e não são bugs do MIMI.
       var msg = (event.exception && event.exception.values && event.exception.values[0] && event.exception.values[0].value) || "";
       if (/extension:\/\//.test(msg) || /chrome-extension/.test(msg)) return null;
+      // FIX: "Failed to fetch" (e variantes) é o erro genérico do navegador
+      // pra "não consegui nem completar a requisição" — sem internet, DNS
+      // falhou, CORS, avião, rede caiu no meio. É conectividade do
+      // aparelho de quem usa, não um bug do MIMI, e o app já lida com isso
+      // sozinho (cai pro backend alternativo, tenta de nova em alguns
+      // segundos). Sem esse filtro, toda queda de rede de qualquer usuário
+      // virava "Error" no Sentry mesmo já sendo tratada normalmente.
+      if (/Failed to fetch/i.test(msg) || /NetworkError/i.test(msg) || /^Load failed$/i.test(msg)) return null;
       return event;
     }
   });
@@ -4011,7 +4019,7 @@ var CFG = {
 // Lê /config/app no Firestore (leitura pública) logo no boot. Se
 // maintenanceMode=true OU a versão deste arquivo < minVersion, bloqueia
 // a tela — sem depender de re-upload no GitHub Pages.
-var APP_VERSION = "2026.08.20.8";
+var APP_VERSION = "2026.08.20.9";
 
 // ─── AUTO-ATUALIZAÇÃO ───────────────────────────────────────
 // Problema antigo: depois de subir um index.html novo no GitHub Pages,
