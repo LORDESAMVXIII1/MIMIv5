@@ -4011,7 +4011,7 @@ var CFG = {
 // Lê /config/app no Firestore (leitura pública) logo no boot. Se
 // maintenanceMode=true OU a versão deste arquivo < minVersion, bloqueia
 // a tela — sem depender de re-upload no GitHub Pages.
-var APP_VERSION = "2026.08.20.6";
+var APP_VERSION = "2026.08.20.7";
 
 // ─── AUTO-ATUALIZAÇÃO ───────────────────────────────────────
 // Problema antigo: depois de subir um index.html novo no GitHub Pages,
@@ -4534,7 +4534,17 @@ function refreshIdToken() {
 // avião) é só uma soneca de rede e NUNCA deve apagar a sessão do usuário —
 // isso é o que fazia o app "voltar ao início" (perfil, posts e comentários
 // somem) só porque uma requisição falhou uma vez.
-var FATAL_AUTH_CODES = ["INVALID_ID_TOKEN","TOKEN_EXPIRED","USER_DISABLED","USER_NOT_FOUND","INVALID_REFRESH_TOKEN"];
+// FIX (deslogava sozinho ao reabrir o app depois de ~1h, log "Erro ao
+// carregar perfil: INVALID_ID_TOKEN" seguido de 401 em cascata no
+// fs-gateway/image-gateway): INVALID_ID_TOKEN é exatamente o que o
+// accounts:lookup devolve pra um idToken simplesmente vencido — o caso
+// NORMAL que o refreshToken existe pra resolver, não um motivo pra
+// encerrar a sessão. Continua fatal só quando é a CONTA ou o próprio
+// refreshToken que morreram de vez: USER_DISABLED/USER_NOT_FOUND (conta
+// não existe mais) e INVALID_REFRESH_TOKEN/TOKEN_EXPIRED vindos da
+// tentativa de RENOVAR o token (aí sim o refreshToken em si venceu ou
+// foi revogado, sem volta).
+var FATAL_AUTH_CODES = ["USER_DISABLED","USER_NOT_FOUND","INVALID_REFRESH_TOKEN","TOKEN_EXPIRED"];
 function isFatalAuthError(err) {
   var msg = (err && err.message) || (err && err.error && err.error.message) || (typeof err === "string" ? err : "");
   return FATAL_AUTH_CODES.some(function(code){ return String(msg).indexOf(code) !== -1; });
