@@ -1481,11 +1481,11 @@
   .story-comments-box { background:var(--surface); border-radius:20px 20px 0 0; width:100%; max-height:60vh; display:flex; flex-direction:column; }
 
   /* ─────────────────────────────────────────────────────────── VIBES FEED ─────────────────────────────────────────────────────────── */
-  .vibes-page { position:relative; width:100%; height:100vh; height:100dvh; background:#000; overflow:hidden; }
+  .vibes-page { position:relative; width:100%; height:100vh; height:100dvh; background:#0b0710; overflow:hidden; }
   .vibes-feed-scroll { height:100vh; height:100dvh; width:100%; overflow-y:scroll; scroll-snap-type:y mandatory; scrollbar-width:none; -ms-overflow-style:none; }
   .vibes-feed-scroll::-webkit-scrollbar { display:none; }
-  .vibe-slide { position:relative; height:100vh; height:100dvh; width:100%; scroll-snap-align:start; display:flex; align-items:center; justify-content:center; background:#000; overflow:hidden; }
-  .vibe-slide video, .vibe-slide img.vibe-video { width:100%; height:100%; object-fit:contain; background:#000; display:block; }
+  .vibe-slide { position:relative; height:100vh; height:100dvh; width:100%; scroll-snap-align:start; display:flex; align-items:center; justify-content:center; background:#0b0710; overflow:hidden; }
+  .vibe-slide video, .vibe-slide img.vibe-video { width:100%; height:100%; object-fit:contain; background:#0b0710; display:block; }
   .vibe-slide .empty-hint { color:#fff; text-align:center; padding:0 30px; font-size:14px; opacity:.7; }
   .vibe-mute-layer { position:absolute; inset:0; z-index:5; pointer-events:none; }
   .vibe-info { position:absolute; left:14px; right:88px; bottom:calc(env(safe-area-inset-bottom,0px) + 90px); z-index:10; color:#fff; }
@@ -2677,6 +2677,61 @@ function fmtNum(n) {
   return (neg ? "-" : "") + out;
 }
 function esc(s) { var d=document.createElement("div"); d.innerText = s==null ? "" : s; return d.innerHTML.replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
+
+// ─── HASHTAGS ─────────────────────────────────────────────────
+// Normaliza uma hashtag (sem o "#") pra minúsculas, pra indexar e comparar
+// de forma consistente (mesma lógica de comparação já usada na busca, que
+// também faz toLowerCase()).
+function normalizeHashtag(tag) { return (tag||"").toLowerCase(); }
+// Extrai todas as #hashtags de um texto, normalizadas e sem duplicatas,
+// na ordem em que aparecem. Usada ao publicar, pra salvar junto do post.
+function extractHashtags(text) {
+  var matches = String(text||"").match(/#[\p{L}0-9_]+/gu) || [];
+  var seen = {}, out = [];
+  matches.forEach(function(m) {
+    var tag = normalizeHashtag(m.slice(1));
+    if (tag && !seen[tag]) { seen[tag] = true; out.push(tag); }
+  });
+  return out;
+}
+// Mesmo padrão de renderTextWithMentions (linha ~2290): escapa o texto e
+// troca só as #hashtags por spans clicáveis, sem re-escapar nada.
+function renderTextWithHashtags(text) {
+  text = String(text||"");
+  var out = "", re = /#[\p{L}0-9_]+/gu, last = 0, m;
+  while ((m = re.exec(text))) {
+    out += esc(text.slice(last, m.index));
+    var tag = normalizeHashtag(m[0].slice(1));
+    out += '<span class="post-hashtag" data-hashtag="'+esc(tag)+'" style="color:'+C.accent+';font-weight:700;cursor:pointer;">'+esc(m[0])+'</span>';
+    last = re.lastIndex;
+  }
+  out += esc(text.slice(last));
+  return out;
+}
+// Conta as hashtags mais usadas entre os posts carregados, pra exibir
+// "Em alta agora" no Explorar com dados reais (em vez da lista fixa).
+function computeTrendingHashtags(limit) {
+  var counts = {};
+  (typeof posts !== "undefined" ? posts : []).forEach(function(p) {
+    var tags = (p.hashtags && p.hashtags.length) ? p.hashtags : extractHashtags(p.text);
+    tags.forEach(function(t) { counts[t] = (counts[t]||0) + 1; });
+  });
+  return Object.keys(counts).map(function(t) { return [t, counts[t]]; })
+    .sort(function(a,b) { return b[1]-a[1]; })
+    .slice(0, limit || 5);
+}
+// Abre o Explorar já buscando por uma hashtag específica (clique num
+// #hashtag dentro de um post).
+function openHashtagSearch(tag) {
+  if (state.page === "feed") pauseAllFeedMedia();
+  state.page = "explore";
+  state.viewProfileId = null;
+  state.profileStack.length = 0;
+  state.postDetailId = null;
+  state.creating = false;
+  state.searchQuery = "#" + tag;
+  render();
+}
 
 // Checa se uma data de nascimento (YYYY-MM-DD) cai hoje (mês/dia), ignorando
 // o ano. Usada tanto pelo BirthdayNotifier quanto pelo aviso pequeno no
@@ -6648,6 +6703,7 @@ var FB = {
     var data = {
       authorId:  ME_ID,
       text:      postData.text  || "",
+      hashtags:  postData.hashtags && postData.hashtags.length ? postData.hashtags : extractHashtags(postData.text || ""),
       img:       postData.img   || null,
       video:     postData.video || null,
       audio:     postData.audio || null,
@@ -6690,6 +6746,9 @@ var FB = {
         d.likedBy = d.likedBy || [];
         d.fireTotal = d.fireTotal || 0;
         d.fireDaily = d.fireDaily || {};
+        // Posts publicados antes deste sistema não têm o campo salvo —
+        // extrai na hora, só pra essa sessão (não regrava no Firestore).
+        d.hashtags = (d.hashtags && d.hashtags.length) ? d.hashtags : extractHashtags(d.text || "");
         // Usa createdAt para tempo relativo; time era o campo ISO antigo
         var isoTime = d.createdAt || d.time || "";
         d.time = (isoTime && isoTime.length > 10) ? _relTime(isoTime) : (isoTime || "antes");
@@ -12268,7 +12327,7 @@ function renderPostCard(post, opts) {
       '</div>' +
       '<button class="icon-btn" data-open-sheet="'+post.id+'" style="color:var(--muted);">'+icoSvg("more",20)+'</button>' +
     '</div>' +
-    '<p class="post-text" '+(opts.noOpenText?"":'data-open-post="'+post.id+'" style="cursor:pointer;"')+'>'+esc(post.text)+'</p>' +
+    '<p class="post-text" '+(opts.noOpenText?"":'data-open-post="'+post.id+'" style="cursor:pointer;"')+'>'+renderTextWithHashtags(post.text)+'</p>' +
     locHtml +
     mediaHtml +
     '<div class="post-actions">' +
@@ -12456,6 +12515,12 @@ function bindPostCardEvents(root) {
     el.addEventListener("click", function(e) {
       e.stopPropagation();
       openPostDetail(el.getAttribute("data-open-post") || el.getAttribute("data-open-post-media"));
+    });
+  });
+  root.querySelectorAll("[data-hashtag]").forEach(function(el) {
+    el.addEventListener("click", function(e) {
+      e.stopPropagation();
+      openHashtagSearch(el.getAttribute("data-hashtag"));
     });
   });
   root.querySelectorAll("[data-open-sheet]").forEach(function(btn) {
@@ -13416,7 +13481,10 @@ function renderExplorePage() {
 
 function buildExploreBodyHtml(q) {
   var cats = ["Tudo","Tech","Arte","Música","Viagem","Comida"];
-  var trends = [["#Mimi","2.1k"],["#ReactJS","1.8k"],["#AppDev","934"],["#Fofura","722"],["#DesignUI","601"]];
+  var realTrends = computeTrendingHashtags(5);
+  var trends = realTrends.length
+    ? realTrends.map(function(t) { return ["#"+t[0], fmtNum(t[1])]; })
+    : [["#Mimi","2.1k"],["#ReactJS","1.8k"],["#AppDev","934"],["#Fofura","722"],["#DesignUI","601"]];
 
   if (q) return renderSearchResults(q);
 
@@ -20015,6 +20083,7 @@ function bindCreatePost() {
       }
       var newPost = {
         id:"p_"+uid(), authorId:ME_ID, text:text,
+        hashtags: extractHashtags(text),
         img: compose.mediaType === "image" ? compose.media : null,
         video: compose.mediaType === "video" ? compose.media : null,
         audio: compose.mediaType === "audio" ? compose.media : null,
@@ -22767,18 +22836,18 @@ var VibesModule = {
   // Anúncio renderizado como um slide de Vibe (sem fogo e sem download).
   renderAdSlide: function(ad) {
     var au = USERS[ad.authorId] || { name:"MIMI", avatar:DEFAULT_AVATAR };
-    var videoStyle = 'position:absolute;inset:0;width:100%;height:100%;max-width:100%;max-height:100%;object-fit:cover;background:#000;display:block;';
+    var videoStyle = 'position:absolute;inset:0;width:100%;height:100%;max-width:100%;max-height:100%;object-fit:cover;background:#0b0710;display:block;';
     // FIX: imagens de anúncio (formato Feed, quadrado/paisagem) estavam sendo
     // esticadas com object-fit:cover dentro do slide vertical de tela cheia
     // das Vibes, cortando e "zoomando" a arte de forma desproporcional.
     // Para imagens usamos "contain" (mostra a arte inteira, sem cortar) com
     // fundo preto preenchendo as sobras; vídeos continuam em "cover" porque
     // já costumam vir no formato vertical das Vibes.
-    var imgStyle = 'position:absolute;inset:0;width:100%;height:100%;max-width:100%;max-height:100%;object-fit:contain;background:#000;display:block;';
+    var imgStyle = 'position:absolute;inset:0;width:100%;height:100%;max-width:100%;max-height:100%;object-fit:contain;background:#0b0710;display:block;';
     var media = ad.video
       ? '<video class="vibe-video" src="'+optimizeCloudinaryVideoUrl(ad.video)+'" playsinline webkit-playsinline loop muted preload="metadata" style="'+videoStyle+'"></video>'
       : '<img class="vibe-video" '+imageTagAttrs(ad.img)+' alt="" style="'+imgStyle+'">';
-    return '<div class="vibe-slide vibe-slide-ad" style="position:relative;width:100%;height:100%;background:#000;overflow:hidden;">' +
+    return '<div class="vibe-slide vibe-slide-ad" style="position:relative;width:100%;height:100%;background:#0b0710;overflow:hidden;">' +
       media +
       '<div class="vibe-info">' +
         '<div class="who" data-open-author="'+(ad.authorId||"")+'" style="cursor:pointer;align-items:flex-start;">' +
@@ -22813,7 +22882,7 @@ var VibesModule = {
     // verdade; o resto nasce com data-src (sem download nenhum) e só recebe
     // o src real quando o usuário chega perto (ver bindEvents/observer).
     var activeVibeIdx = (typeof self._activeVibeIdx === "number") ? self._activeVibeIdx : 0;
-    var html = '<div class="vibes-page" style="position:relative;width:100%;height:100vh;height:100dvh;background:#000;overflow:hidden;">';
+    var html = '<div class="vibes-page" style="position:relative;width:100%;height:100vh;height:100dvh;background:#0b0710;overflow:hidden;">';
 
     if (this.vibes.length === 0 && this._loading) {
       html += '<div style="display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;color:#fff;padding:20px;">' +
@@ -22856,7 +22925,7 @@ var VibesModule = {
               avatarHtml(vAvatar, 46, false, false, false, null, null, vFrame) +
               '<div class="uname">'+esc(vibe.username)+'</div>' +
             '</div>' +
-            '<div class="cap">'+vibe.caption+'</div>' +
+            '<div class="cap">'+renderTextWithHashtags(vibe.caption)+'</div>' +
           '</div>' +
           '<div class="vibe-side">' +
             '<button class="vibe-like-btn" data-vibe-idx="'+idx+'">' +
@@ -23032,6 +23101,15 @@ var VibesModule = {
       el.addEventListener("click", function(e) {
         e.stopPropagation();
         openProfile(el.getAttribute("data-open-author"));
+      });
+    });
+
+    // Toca numa #hashtag da legenda: abre o Explorar já buscando por ela
+    // (mesmo comportamento do Feed — ver openHashtagSearch).
+    appEl.querySelectorAll(".vibe-slide [data-hashtag]").forEach(function(el) {
+      el.addEventListener("click", function(e) {
+        e.stopPropagation();
+        openHashtagSearch(el.getAttribute("data-hashtag"));
       });
     });
 
