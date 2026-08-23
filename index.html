@@ -4019,7 +4019,7 @@ var CFG = {
 // Lê /config/app no Firestore (leitura pública) logo no boot. Se
 // maintenanceMode=true OU a versão deste arquivo < minVersion, bloqueia
 // a tela — sem depender de re-upload no GitHub Pages.
-var APP_VERSION = "2026.08.21.3";
+var APP_VERSION = "2026.08.21.4";
 
 // ─── AUTO-ATUALIZAÇÃO ───────────────────────────────────────
 // Problema antigo: depois de subir um index.html novo no GitHub Pages,
@@ -22782,7 +22782,7 @@ var VibesModule = {
       media +
       '<div class="vibe-info">' +
         '<div class="who" data-open-author="'+(ad.authorId||"")+'" style="cursor:pointer;align-items:flex-start;">' +
-          avatarHtml(au.avatar, 62, false, false, false, null, null, getUserFrame(au)) +
+          avatarHtml(au.avatar, 46, false, false, false, null, null, getUserFrame(au)) +
           '<div>' +
             '<div class="uname">'+esc(au.name || "MIMI")+'</div>' +
             adBadgeHtml(2) +
@@ -22853,7 +22853,7 @@ var VibesModule = {
           '</button>' +
           '<div class="vibe-info">' +
             '<div class="who" data-open-author="'+(vibe.userId||"")+'" style="cursor:pointer;">' +
-              avatarHtml(vAvatar, 62, false, false, false, null, null, vFrame) +
+              avatarHtml(vAvatar, 46, false, false, false, null, null, vFrame) +
               '<div class="uname">'+esc(vibe.username)+'</div>' +
             '</div>' +
             '<div class="cap">'+vibe.caption+'</div>' +
