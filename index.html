@@ -4074,7 +4074,7 @@ var CFG = {
 // Lê /config/app no Firestore (leitura pública) logo no boot. Se
 // maintenanceMode=true OU a versão deste arquivo < minVersion, bloqueia
 // a tela — sem depender de re-upload no GitHub Pages.
-var APP_VERSION = "2026.08.23.7";
+var APP_VERSION = "2026.08.23.8";
 
 // ─── AUTO-ATUALIZAÇÃO ───────────────────────────────────────
 // Problema antigo: depois de subir um index.html novo no GitHub Pages,
@@ -23195,6 +23195,7 @@ var VibesModule = {
     }
     this._commentsHost = host;
     host.innerHTML = this.renderCommentsSheet(vibeId);
+    if (typeof hydrateImages === "function") hydrateImages(host);
     this.bindCommentsSheet();
     if (typeof FB !== "undefined" && FB.loadVibeComments) {
       FB.loadVibeComments(vibeId).then(function() {
@@ -23214,6 +23215,7 @@ var VibesModule = {
     var typed = (keepInput && input) ? input.value : "";
     var hadFocus = !!(input && document.activeElement === input);
     host.innerHTML = this.renderCommentsSheet(vibeId);
+    if (typeof hydrateImages === "function") hydrateImages(host);
     this.bindCommentsSheet();
     var newInput = host.querySelector('[data-vibe-comment-input="'+vibeId+'"]');
     if (newInput && typed) newInput.value = typed;
