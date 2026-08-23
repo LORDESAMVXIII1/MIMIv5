@@ -4074,7 +4074,7 @@ var CFG = {
 // Lê /config/app no Firestore (leitura pública) logo no boot. Se
 // maintenanceMode=true OU a versão deste arquivo < minVersion, bloqueia
 // a tela — sem depender de re-upload no GitHub Pages.
-var APP_VERSION = "2026.08.23.3";
+var APP_VERSION = "2026.08.23.4";
 
 // ─── AUTO-ATUALIZAÇÃO ───────────────────────────────────────
 // Problema antigo: depois de subir um index.html novo no GitHub Pages,
@@ -5144,13 +5144,14 @@ function fsQuery(collection, field, op, value, convoId) {
   }
   if (typeof SupabaseDB === "undefined") return viaFirebase({ message: "sem SupabaseDB" });
   return viaSupabase().then(function(rows){
-    // 🛟 Mesma lógica de fsList: resultado vazio do Supabase antes do
-    // backfill confirmado é ambíguo (pode ser "realmente vazio" ou
-    // "esses documentos ainda só existem no Firebase, nunca foram
-    // espelhados"). Sem isso, vibeChunks/storyChunks antigos (só no
-    // Firebase) voltavam [] do Supabase, o vídeo ficava sem videoUrl e
-    // a vibe/story inteira sumia em silêncio do feed.
-    if ((!rows || rows.length === 0) && !_isBackfillConfirmed() && !_isFirebaseThrottled()) {
+    // 🛟 Resultado vazio do Supabase é ambíguo mesmo com o backfill geral
+    // já confirmado — um documento específico (ex.: um vibeChunk antigo)
+    // pode ter ficado de fora do espelho por um erro pontual na época,
+    // sem que isso derrube o selo de confirmação do backfill inteiro.
+    // Sem checar o Firebase aqui, vibeChunks/storyChunks faltantes
+    // voltavam [] do Supabase, o vídeo ficava sem videoUrl e a
+    // vibe/story inteira sumia em silêncio do feed.
+    if ((!rows || rows.length === 0) && !_isFirebaseThrottled()) {
       return viaFirebase({ message: "lista vazia no Supabase, conferindo Firebase" }).catch(function(){ return rows || []; });
     }
     return rows;
@@ -7069,12 +7070,21 @@ var FB = {
         return fsQuery("vibeChunks","vibeId","EQUAL",d._id).then(function(chunks){
           chunks = (chunks||[]).sort(function(a,b){ return (a.index||0)-(b.index||0); });
           d.videoUrl = chunks.map(function(c){ return c.data || ""; }).join("");
+          if (!d.videoUrl) console.warn("⚠️ Vibe " + d._id + ": nenhum vibeChunk encontrado (Supabase + Firebase) — vídeo vazio.");
           return d;
-        }).catch(function(){ d.videoUrl = null; return d; });
+        }).catch(function(err){
+          console.warn("⚠️ Vibe " + d._id + ": falha ao buscar vibeChunks —", err && err.message || err);
+          d.videoUrl = null;
+          return d;
+        });
       }));
     }).then(function(fullDocs){
       // moderação (3.1): mesmo critério do loadPosts — some da lista dos
       // outros, mas o autor continua vendo a própria vibe.
+      var missing = fullDocs.filter(function(d){ return d.chunked && !d.videoUrl; }).length;
+      if (missing > 0 && typeof showToast === "function") {
+        showToast(toastWithIcon(missing + " vibe(s) não puderam ser carregadas (vídeo não encontrado).", "warning", "before"), true);
+      }
       return fullDocs.filter(function(d){
         if (!d.videoUrl) return false;
         if (d.moderationStatus === "removed" || d.moderationStatus === "under_review") {
