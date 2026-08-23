@@ -4019,7 +4019,7 @@ var CFG = {
 // Lê /config/app no Firestore (leitura pública) logo no boot. Se
 // maintenanceMode=true OU a versão deste arquivo < minVersion, bloqueia
 // a tela — sem depender de re-upload no GitHub Pages.
-var APP_VERSION = "2026.08.21.2";
+var APP_VERSION = "2026.08.21.3";
 
 // ─── AUTO-ATUALIZAÇÃO ───────────────────────────────────────
 // Problema antigo: depois de subir um index.html novo no GitHub Pages,
@@ -22782,7 +22782,7 @@ var VibesModule = {
       media +
       '<div class="vibe-info">' +
         '<div class="who" data-open-author="'+(ad.authorId||"")+'" style="cursor:pointer;align-items:flex-start;">' +
-          avatarHtml(au.avatar, 54, false, false, false, null, null, getUserFrame(au)) +
+          avatarHtml(au.avatar, 62, false, false, false, null, null, getUserFrame(au)) +
           '<div>' +
             '<div class="uname">'+esc(au.name || "MIMI")+'</div>' +
             adBadgeHtml(2) +
@@ -22792,13 +22792,13 @@ var VibesModule = {
       '</div>' +
       '<div class="vibe-side">' +
         '<button class="vibe-like-btn" data-ad-vibe-like="'+ad.id+'">' +
-          '<span class="heart-icon">'+sparkleIcon("like",26,"#fff")+'</span>' +
+          '<span class="heart-icon">'+sparkleIcon("like",34,"#fff")+'</span>' +
         '</button>' +
         '<button class="vibe-comment-btn" data-ad-vibe-open="'+ad.id+'">' +
-          sparkleIcon("comment",26,"#fff") +
+          sparkleIcon("comment",34,"#fff") +
         '</button>' +
-        '<button class="vibe-share-btn" data-ad-vibe-open="'+ad.id+'">'+sparkleIcon("share",26,"#fff")+'</button>' +
-        '<button class="vibe-save-btn" data-ad-vibe-open="'+ad.id+'">'+sparkleIcon("save",26,"#fff")+'</button>' +
+        '<button class="vibe-share-btn" data-ad-vibe-open="'+ad.id+'">'+sparkleIcon("share",34,"#fff")+'</button>' +
+        '<button class="vibe-save-btn" data-ad-vibe-open="'+ad.id+'">'+sparkleIcon("save",34,"#fff")+'</button>' +
       '</div>' +
     '</div>';
   },
@@ -22853,35 +22853,35 @@ var VibesModule = {
           '</button>' +
           '<div class="vibe-info">' +
             '<div class="who" data-open-author="'+(vibe.userId||"")+'" style="cursor:pointer;">' +
-              avatarHtml(vAvatar, 54, false, false, false, null, null, vFrame) +
+              avatarHtml(vAvatar, 62, false, false, false, null, null, vFrame) +
               '<div class="uname">'+esc(vibe.username)+'</div>' +
             '</div>' +
             '<div class="cap">'+vibe.caption+'</div>' +
           '</div>' +
           '<div class="vibe-side">' +
             '<button class="vibe-like-btn" data-vibe-idx="'+idx+'">' +
-              '<span class="heart-icon">'+sparkleIcon("like",26, vibe.liked?"#ff4d6d":"#fff")+'</span>' +
+              '<span class="heart-icon">'+sparkleIcon("like",34, vibe.liked?"#ff4d6d":"#fff")+'</span>' +
               '<span class="like-count">'+vibe.likes+'</span>' +
             '</button>' +
             '<button class="vibe-fire-btn '+(vibeMyFireCount(vibe)>0?"fired":"")+'" data-vibe-idx="'+idx+'">' +
-              '<span class="fire-icon">'+fireSvg(26, null, vibeMyFireCount(vibe)>0, VIBE_FIRE_GRADIENT)+'</span>' +
+              '<span class="fire-icon">'+fireSvg(34, null, vibeMyFireCount(vibe)>0, VIBE_FIRE_GRADIENT)+'</span>' +
               '<span class="fire-count">'+fmtNum(vibeFireCount(vibe))+'</span>' +
             '</button>' +
             '<button class="vibe-comment-btn" data-vibe-idx="'+idx+'">' +
-              sparkleIcon("comment",26,"#fff") +
+              sparkleIcon("comment",34,"#fff") +
               '<span class="comment-count">'+fmtNum(getComments(vibe.id).length)+'</span>' +
             '</button>' +
             '<button class="vibe-share-btn">' +
-              sparkleIcon("share",26,"#fff") +
+              sparkleIcon("share",34,"#fff") +
             '</button>' +
             '<button class="vibe-save-btn">' +
-              sparkleIcon("save",26,"#fff") +
+              sparkleIcon("save",34,"#fff") +
             '</button>' +
             '<button class="vibe-download-btn" data-vibe-idx="'+idx+'">' +
-              sparkleIcon("download",26,"#fff") +
+              sparkleIcon("download",34,"#fff") +
             '</button>' +
             '<button class="vibe-more-btn" data-vibe-more-idx="'+idx+'">' +
-              icoSvg("more",24,"#fff") +
+              icoSvg("more",30,"#fff") +
             '</button>' +
           '</div>' +
           '</div>';
@@ -23047,7 +23047,7 @@ var VibesModule = {
           setTimeout(function() { btn.classList.remove("heart-pulse"); }, 350);
           // Update icon color + count
           var heartEl = btn.querySelector(".heart-icon");
-          if (heartEl) heartEl.innerHTML = sparkleIcon("like", 32, vibe.liked ? "#ff4d6d" : "#fff");
+          if (heartEl) heartEl.innerHTML = sparkleIcon("like", 34, vibe.liked ? "#ff4d6d" : "#fff");
           btn.querySelector(".like-count").textContent = vibe.likes;
           FB.likeVibe(vibe.id, vibe.liked);
         }
@@ -23094,7 +23094,7 @@ var VibesModule = {
         vibe.fireTotal = (vibe.fireTotal || 0) + 1;
         btn.classList.add("fired");
         var fireEl = btn.querySelector(".fire-icon");
-        if (fireEl) fireEl.innerHTML = fireSvg(32, null, true, VIBE_FIRE_GRADIENT);
+        if (fireEl) fireEl.innerHTML = fireSvg(34, null, true, VIBE_FIRE_GRADIENT);
         var countEl = btn.querySelector(".fire-count");
         if (countEl) countEl.textContent = fmtNum(vibeFireCount(vibe));
         btn.classList.add("fire-pop");
@@ -23160,7 +23160,7 @@ var VibesModule = {
         e.stopPropagation();
         var on = btn.classList.toggle("ad-liked");
         var heartEl = btn.querySelector(".heart-icon");
-        if (heartEl) heartEl.innerHTML = sparkleIcon("like", 32, on ? "#ff4d6d" : "#fff");
+        if (heartEl) heartEl.innerHTML = sparkleIcon("like", 34, on ? "#ff4d6d" : "#fff");
       });
     });
     appEl.querySelectorAll("[data-ad-vibe-open]").forEach(function(btn) {
@@ -23370,7 +23370,7 @@ var VibesModule = {
       var btn = document.querySelector('.vibe-like-btn[data-vibe-idx="'+idx+'"]');
       if (btn) {
         var heartEl = btn.querySelector(".heart-icon");
-        if (heartEl) heartEl.innerHTML = sparkleIcon("like", 32, "#ff4d6d");
+        if (heartEl) heartEl.innerHTML = sparkleIcon("like", 34, "#ff4d6d");
         var countEl = btn.querySelector(".like-count");
         if (countEl) countEl.textContent = vibe.likes;
         btn.classList.add("heart-pulse");
