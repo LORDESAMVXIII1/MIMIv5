@@ -4074,7 +4074,7 @@ var CFG = {
 // Lê /config/app no Firestore (leitura pública) logo no boot. Se
 // maintenanceMode=true OU a versão deste arquivo < minVersion, bloqueia
 // a tela — sem depender de re-upload no GitHub Pages.
-var APP_VERSION = "2026.08.23.5";
+var APP_VERSION = "2026.08.23.6";
 
 // ─── AUTO-ATUALIZAÇÃO ───────────────────────────────────────
 // Problema antigo: depois de subir um index.html novo no GitHub Pages,
@@ -6788,7 +6788,12 @@ var FB = {
 
   loadPosts: function() {
     if (!_idToken) return Promise.resolve();
-    return fsList("posts").then(function(docs){
+    // FIX (publicações de vídeo sumindo do Feed): fsList() só conferia o
+    // Firebase quando o Supabase devolvia a lista VAZIA. Se o espelho do
+    // Supabase estivesse só INCOMPLETO (posts antigos que nunca foram
+    // copiados — justamente os mais pesados, com vídeo), esses posts
+    // sumiam em silêncio. Agora usa a mesma leitura mesclada das Vibes.
+    return _fsListMerged("posts").then(function(docs){
       // FIX: um resultado vazio do Firestore é uma resposta válida (a conta
       // realmente não tem posts ainda / ninguém que você segue publicou) —
       // não é um erro de rede (erros de rede caem no .catch abaixo). Antes,
@@ -7127,6 +7132,11 @@ var FB = {
       // moderação (3.1): mesmo critério do loadPosts — some da lista dos
       // outros, mas o autor continua vendo a própria vibe.
       var missing = fullDocs.filter(function(d){ return d.chunked && !d.videoUrl; }).length;
+      // Diagnóstico (sem DevTools): quantas vibes vieram do banco e
+      // quantas foram descartadas por vídeo ausente — some no console e
+      // ajuda a saber se o problema é leitura ou vídeo mesmo.
+      console.log("[DEBUG loadVibes] vibes no banco:", fullDocs.length,
+        "| sem vídeo (descartadas):", fullDocs.filter(function(d){ return !d.videoUrl; }).length);
       if (missing > 0 && typeof showToast === "function") {
         showToast(toastWithIcon(missing + " vibe(s) não puderam ser carregadas (vídeo não encontrado).", "warning", "before"), true);
       }
@@ -22975,7 +22985,7 @@ var VibesModule = {
         var vAvatar = (vUser && vUser.avatar) || vibe.avatar || (DEFAULT_AVATAR);
         var vFrame = vUser ? getUserFrame(vUser) : null;
         var optimizedVideoUrl = optimizeCloudinaryVideoUrl(vibe.videoUrl);
-        var isNearVibe = (idx === activeVibeIdx || idx === activeVibeIdx + 1);
+        var isNearVibe = (idx >= activeVibeIdx - 1 && idx <= activeVibeIdx + 1);
         var vibeVideoSrcAttr = isNearVibe
           ? ' src="'+optimizedVideoUrl+'"'
           : ' data-src="'+optimizedVideoUrl+'"';
@@ -23391,16 +23401,27 @@ var VibesModule = {
               // Vibe atual "oficialmente" em foco — guarda o índice (sobrevive
               // a re-renders, ver renderPage) e acende o src real só da
               // próxima vibe adjacente, que até aqui só tinha data-src.
+              // FIX (só 2 vídeos apareciam nas Vibes): o carregamento
+              // preguiçoso só acendia o src da PRÓXIMA vibe. Se a pessoa
+              // rolasse rápido (ou depois de um re-render, ou logo após um
+              // slide de anúncio), o vídeo que entrava na tela ainda tinha
+              // apenas data-src — o <video> ficava sem fonte e o slide
+              // aparecia preto, como se a vibe tivesse sumido. Agora
+              // hidrata SEMPRE o vídeo que está entrando na tela, e só
+              // depois adianta o vizinho.
+              var _hydrateVibeVideo = function(el) {
+                if (!el) return;
+                if (el.getAttribute("src")) return;
+                var pending = el.getAttribute("data-src");
+                if (!pending) return;
+                el.src = pending;
+                el.load();
+              };
+              _hydrateVibeVideo(video);
               if (idx !== null) {
                 self._activeVibeIdx = parseInt(idx, 10);
-                var nextVideo = document.getElementById("vibeVideo-" + (self._activeVibeIdx + 1));
-                if (nextVideo && !nextVideo.getAttribute("src")) {
-                  var pendingSrc = nextVideo.getAttribute("data-src");
-                  if (pendingSrc) {
-                    nextVideo.src = pendingSrc;
-                    nextVideo.load();
-                  }
-                }
+                _hydrateVibeVideo(document.getElementById("vibeVideo-" + (self._activeVibeIdx + 1)));
+                _hydrateVibeVideo(document.getElementById("vibeVideo-" + (self._activeVibeIdx - 1)));
               }
               video.muted = false; // tenta tocar com som, igual ao player do Feed
               var playPromise = video.play();
