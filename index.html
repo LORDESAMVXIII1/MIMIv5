@@ -4074,7 +4074,7 @@ var CFG = {
 // Lê /config/app no Firestore (leitura pública) logo no boot. Se
 // maintenanceMode=true OU a versão deste arquivo < minVersion, bloqueia
 // a tela — sem depender de re-upload no GitHub Pages.
-var APP_VERSION = "2026.08.23.6";
+var APP_VERSION = "2026.08.23.7";
 
 // ─── AUTO-ATUALIZAÇÃO ───────────────────────────────────────
 // Problema antigo: depois de subir um index.html novo no GitHub Pages,
@@ -13613,10 +13613,25 @@ function bindExploreBodyEvents(container) {
   container.querySelectorAll("[data-open-post]").forEach(function(el) {
     el.addEventListener("click", function() { openPostDetail(el.getAttribute("data-open-post")); });
   });
+  // Vídeo encontrado na busca abre o player de Vibes, mesmo caminho do
+  // clique numa vibe na grade do perfil.
+  container.querySelectorAll("[data-open-vibe]").forEach(function(el) {
+    el.addEventListener("click", function() { openVibeFromProfile(el.getAttribute("data-open-vibe")); });
+  });
 }
 
 function renderSearchResults(q) {
   var qLower = q.toLowerCase();
+  // Busca começando com "#" compara com as hashtags normalizadas (mesma
+  // normalização do extractHashtags ao publicar), não só com o texto cru.
+  var hashtagQuery = (qLower.charAt(0) === "#" && qLower.length > 1) ? qLower.slice(1) : null;
+  function matchesHashtag(tags) {
+    if (!hashtagQuery) return false;
+    for (var i = 0; i < tags.length; i++) {
+      if (tags[i] === hashtagQuery || tags[i].indexOf(hashtagQuery) === 0) return true;
+    }
+    return false;
+  }
   // FIX (bloqueio incompleto): a busca continuava mostrando o perfil e as
   // publicações de gente bloqueada normalmente — some daqui também.
   // Inclui utilizadores locais (demo) E utilizadores reais já carregados
@@ -13629,11 +13644,23 @@ function renderSearchResults(q) {
   var postResults = posts.filter(function(p) {
     if (p.isAd && !adShowsIn(p, "search")) return false; // anúncio oculto/sem "Busca" não aparece aqui
     if (isUserBlocked(p.authorId)) return false;
+    if (matchesHashtag((p.hashtags && p.hashtags.length) ? p.hashtags : extractHashtags(p.text))) return true;
     return (p.text||"").toLowerCase().indexOf(qLower) !== -1;
   });
+  // FIX (hashtag não achava vídeo): a busca só olhava perfis e posts —
+  // vibes ficavam de fora, então "#forró" não mostrava o vídeo cuja
+  // legenda usa a hashtag. Agora as vibes carregadas entram na busca,
+  // tanto pelo texto da legenda quanto pelas hashtags extraídas dela.
+  var vibeSource = (typeof VibesModule !== "undefined" && VibesModule.vibes) ? VibesModule.vibes : [];
+  var vibeResults = vibeSource.filter(function(v) {
+    if (!v) return false;
+    if (isUserBlocked(v.userId)) return false;
+    if (matchesHashtag(extractHashtags(v.caption))) return true;
+    return (v.caption||"").toLowerCase().indexOf(qLower) !== -1;
+  });
 
-  if (!userResults.length && !postResults.length) {
-    return '<div class="search-empty">Nenhum resultado para "'+esc(q)+'".<br>Tente buscar por nome, @usuário ou palavra-chave.</div>';
+  if (!userResults.length && !postResults.length && !vibeResults.length) {
+    return '<div class="search-empty">Nenhum resultado para "'+esc(q)+'".<br>Tente buscar por nome, @usuário ou #hashtag.</div>';
   }
 
   var html = '<div class="search-results">';
@@ -13652,6 +13679,15 @@ function renderSearchResults(q) {
       html += '<div class="follow-row" data-open-post="'+p.id+'">' + avatarHtml(author.avatar,40,false,false,false,null,null,getUserFrame(author)) +
         '<div class="follow-row-info"><div class="follow-row-name">'+esc(author.name)+'</div>' +
         '<div class="follow-row-username" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(p.text||"")+'</div></div></div>';
+    });
+  }
+  if (vibeResults.length) {
+    html += '<div class="search-section-title">Vídeos</div>';
+    vibeResults.forEach(function(v) {
+      var vauthor = USERS[v.userId] || { name: v.username || "Utilizador", avatar: v.avatar || DEFAULT_AVATAR };
+      html += '<div class="follow-row" data-open-vibe="'+v.id+'">' + avatarHtml(vauthor.avatar || DEFAULT_AVATAR,40,false,false,false,null,null,getUserFrame(vauthor)) +
+        '<div class="follow-row-info"><div class="follow-row-name">'+esc(vauthor.name || v.username || "Utilizador")+'</div>' +
+        '<div class="follow-row-username" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(v.caption||"")+'</div></div></div>';
     });
   }
   html += '</div>';
@@ -13686,6 +13722,21 @@ function bindExplorePage() {
             // Só atualiza se a busca ainda for a mesma (pessoa não apagou/trocou o texto)
             if (changed && state.searchQuery.trim() === q) updateExploreBody();
           });
+          // Se as vibes ainda não foram carregadas nesta sessão (a pessoa
+          // foi direto pro Explorar), busca em segundo plano pra hashtag
+          // achar vídeo também. Não marca _userLoaded: ao abrir a aba
+          // Vibes, loadUserVibes refaz a carga com o ranking completo.
+          if (typeof VibesModule !== "undefined" && !VibesModule._userLoaded && !VibesModule._searchLoading) {
+            VibesModule._searchLoading = true;
+            FB.loadVibes().then(function(foundVibes) {
+              VibesModule._searchLoading = false;
+              if (VibesModule._userLoaded) return; // a aba Vibes carregou nesse meio-tempo — não sobrescreve o ranking
+              VibesModule.vibes = (foundVibes || []).filter(function(v) {
+                return v && !isVibeNotInterested(v.id) && !isUserBlocked(v.userId);
+              });
+              if (state.page === "explore" && state.searchQuery.trim() === q) updateExploreBody();
+            }).catch(function() { VibesModule._searchLoading = false; });
+          }
         }, 350);
       }
     });
