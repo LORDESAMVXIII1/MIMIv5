@@ -4074,7 +4074,7 @@ var CFG = {
 // Lê /config/app no Firestore (leitura pública) logo no boot. Se
 // maintenanceMode=true OU a versão deste arquivo < minVersion, bloqueia
 // a tela — sem depender de re-upload no GitHub Pages.
-var APP_VERSION = "2026.08.23.4";
+var APP_VERSION = "2026.08.23.5";
 
 // ─── AUTO-ATUALIZAÇÃO ───────────────────────────────────────
 // Problema antigo: depois de subir um index.html novo no GitHub Pages,
@@ -5110,6 +5110,51 @@ function fsList(collection) {
     });
   });
 }
+
+// ✅ Junta os documentos do Supabase COM os do Firebase (por _id), pra
+// coleções onde o espelho pode estar incompleto sem vir vazio (ex.:
+// "vibes"/"vibeChunks" — algumas vibes aparecem, outras não, porque só
+// uma parte foi copiada; a checagem de "lista vazia" em fsList/fsQuery
+// não pega esse caso, já que a lista não vem vazia, só incompleta).
+// Quando o mesmo _id existe nos dois lados, o do Supabase prevalece
+// (é a fonte mais atual pra escritas novas).
+function _fsListMerged(collection) {
+  var supaPromise = (typeof SupabaseDB !== "undefined")
+    ? SupabaseDB.mirror.list(collection).catch(function(){ return []; })
+    : Promise.resolve([]);
+  var firePromise = _isFirebaseThrottled() ? Promise.resolve([]) : _fsListFirebase(collection).catch(function(){ return []; });
+  return Promise.all([supaPromise, firePromise]).then(function(results){
+    var map = {};
+    (results[1] || []).forEach(function(d){ map[d._id] = d; });
+    (results[0] || []).forEach(function(d){ map[d._id] = d; });
+    return Object.keys(map).map(function(k){ return map[k]; });
+  });
+}
+function _fsQueryMerged(collection, field, op, value, convoId) {
+  var supaPromise = (typeof SupabaseDB !== "undefined")
+    ? SupabaseDB.mirror.query(collection, field, op, value, convoId).catch(function(){ return []; })
+    : Promise.resolve([]);
+  var fireUrl = FIRE_DB+":runQuery";
+  var fireBody = {
+    structuredQuery: {
+      from: [{ collectionId: collection }],
+      where: { fieldFilter: { field: { fieldPath: field }, op: op, value: fsValue(value) } }
+    }
+  };
+  var firePromise = _isFirebaseThrottled() ? Promise.resolve([]) : fsFetch(fireUrl, { method:"POST", headers: authHeaders(), body: JSON.stringify(fireBody) })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (Array.isArray(d)) return d.filter(function(x){ return x.document; }).map(function(x){ return fsDocToObj(x.document); });
+      return [];
+    }).catch(function(){ return []; });
+  return Promise.all([supaPromise, firePromise]).then(function(results){
+    var map = {};
+    (results[1] || []).forEach(function(d){ map[d._id] = d; });
+    (results[0] || []).forEach(function(d){ map[d._id] = d; });
+    return Object.keys(map).map(function(k){ return map[k]; });
+  });
+}
+
 function fsQuery(collection, field, op, value, convoId) {
   // ✅ FIX (item 1 — mídia de outros usuários): antes isso chamava
   // mirror.list(collection) e baixava a COLEÇÃO INTEIRA (todo chunk de
@@ -7062,12 +7107,12 @@ var FB = {
   // `since` opcional para trazer só as vibes novas desde a última sincronização.
   loadVibes: function(since) {
     if (!_idToken) return Promise.resolve([]);
-    var docsPromise = since ? fsListIncremental("vibes", since) : fsList("vibes");
+    var docsPromise = since ? fsListIncremental("vibes", since) : _fsListMerged("vibes");
     return docsPromise.then(function(docs){
       docs = docs || [];
       return Promise.all(docs.map(function(d){
         if (!d.chunked) return d;
-        return fsQuery("vibeChunks","vibeId","EQUAL",d._id).then(function(chunks){
+        return _fsQueryMerged("vibeChunks","vibeId","EQUAL",d._id).then(function(chunks){
           chunks = (chunks||[]).sort(function(a,b){ return (a.index||0)-(b.index||0); });
           d.videoUrl = chunks.map(function(c){ return c.data || ""; }).join("");
           if (!d.videoUrl) console.warn("⚠️ Vibe " + d._id + ": nenhum vibeChunk encontrado (Supabase + Firebase) — vídeo vazio.");
