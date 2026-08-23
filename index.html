@@ -4074,7 +4074,7 @@ var CFG = {
 // Lê /config/app no Firestore (leitura pública) logo no boot. Se
 // maintenanceMode=true OU a versão deste arquivo < minVersion, bloqueia
 // a tela — sem depender de re-upload no GitHub Pages.
-var APP_VERSION = "2026.08.23.8";
+var APP_VERSION = "2026.08.23.9";
 
 // ─── AUTO-ATUALIZAÇÃO ───────────────────────────────────────
 // Problema antigo: depois de subir um index.html novo no GitHub Pages,
@@ -23040,8 +23040,13 @@ var VibesModule = {
         var vibeVideoSrcAttr = isNearVibe
           ? ' src="'+optimizedVideoUrl+'"'
           : ' data-src="'+optimizedVideoUrl+'"';
+        // Vídeos que já nascem com src real (ativo + vizinhos) também já
+        // nascem com preload="auto", senão o navegador só baixa metadados
+        // e o vídeo "pré-carregado" ainda precisa bufferizar do zero quando
+        // vira o ativo (ver mesmo fix em _hydrateVibeVideo, no observer).
+        var vibeVideoPreload = isNearVibe ? "auto" : "metadata";
         html += '<div class="vibe-slide" data-vibe-idx="'+idx+'">' +
-          '<video class="vibe-video" id="vibeVideo-'+idx+'"'+vibeVideoSrcAttr+' playsinline webkit-playsinline loop preload="metadata"></video>' +
+          '<video class="vibe-video" id="vibeVideo-'+idx+'"'+vibeVideoSrcAttr+' playsinline webkit-playsinline loop preload="'+vibeVideoPreload+'"></video>' +
           '<div class="vibe-mute-layer"></div>' +
           '<div class="vibe-doubletap-heart" id="vibeDTHeart-'+idx+'">'+sparkleIcon("like",90,"#fff")+'</div>' +
           '<button class="mute-btn" style="bottom:auto;top:calc(env(safe-area-inset-top,0px) + 14px);" data-vibe-mute-idx="'+idx+'" title="Som">' +
@@ -23183,6 +23188,7 @@ var VibesModule = {
   // Fica num host próprio no <body> para que qualquer render() da aplicação
   // (polling de notificações, curtidas etc.) não feche nem remonte o painel.
   _commentsHost: null,
+  _loadedVibeComments: {}, // vibeId -> true, evita re-buscar do Firestore toda vez que o painel abre
 
   openComments: function(vibeId) {
     var self = this;
@@ -23197,8 +23203,12 @@ var VibesModule = {
     host.innerHTML = this.renderCommentsSheet(vibeId);
     if (typeof hydrateImages === "function") hydrateImages(host);
     this.bindCommentsSheet();
-    if (typeof FB !== "undefined" && FB.loadVibeComments) {
+    // Se os comentários dessa vibe já foram pré-carregados (ver observer de
+    // scroll das Vibes), não busca de novo — o painel abre com os dados que
+    // já estão em memória, sem esperar o Firestore de novo.
+    if (!this._loadedVibeComments[vibeId] && typeof FB !== "undefined" && FB.loadVibeComments) {
       FB.loadVibeComments(vibeId).then(function() {
+        self._loadedVibeComments[vibeId] = true;
         if (self.commentsFor === vibeId) self.refreshComments(true);
       }).catch(function(err) {
         console.error("Erro ao carregar comentários da vibe:", err);
@@ -23572,6 +23582,14 @@ var VibesModule = {
                 if (el.getAttribute("src")) return;
                 var pending = el.getAttribute("data-src");
                 if (!pending) return;
+                // FIX (vídeo demorava pra abrir mesmo já "hidratado"):
+                // preload="metadata" só baixa duração/dimensões, não o
+                // vídeo em si — então mesmo pré-carregado, ele ainda tinha
+                // que baixar tudo do zero ao virar o vídeo ativo. Muda pra
+                // "auto" só nos vídeos hidratados (atual + vizinhos), pra
+                // esses já chegarem bufferizados quando a pessoa rolar até
+                // eles, sem gastar banda com os vídeos distantes na lista.
+                el.preload = "auto";
                 el.src = pending;
                 el.load();
               };
@@ -23581,6 +23599,29 @@ var VibesModule = {
                 _hydrateVibeVideo(document.getElementById("vibeVideo-" + (self._activeVibeIdx + 1)));
                 _hydrateVibeVideo(document.getElementById("vibeVideo-" + (self._activeVibeIdx - 1)));
               }
+              // Pré-carrega os comentários da vibe (e da vizinha seguinte)
+              // assim que ela entra em foco — antes disso, o contador de
+              // comentários ficava travado em 0 até a pessoa abrir o painel,
+              // e aí o painel ainda demorava porque só buscava nesse momento.
+              // Agora busca em segundo plano; se a pessoa abrir o painel
+              // depois, os dados já estão prontos (ver openComments).
+              var _prefetchVibeComments = function(v) {
+                if (!v || !v.id) return;
+                if (self._loadedVibeComments[v.id]) return;
+                if (typeof FB === "undefined" || !FB.loadVibeComments) return;
+                self._loadedVibeComments[v.id] = true; // marca antes de chamar, evita disparo duplo
+                FB.loadVibeComments(v.id).then(function() {
+                  var vIdx = self.vibes.findIndex(function(x){ return x.id === v.id; });
+                  if (vIdx === -1) return;
+                  var cntEl = document.querySelector('.vibe-comment-btn[data-vibe-idx="'+vIdx+'"] .comment-count');
+                  if (cntEl) cntEl.textContent = fmtNum(getComments(v.id).length);
+                }).catch(function(err) {
+                  self._loadedVibeComments[v.id] = false; // libera pra tentar de novo depois
+                  console.error("Erro ao pré-carregar comentários da vibe:", err);
+                });
+              };
+              _prefetchVibeComments(vibe);
+              _prefetchVibeComments(self.vibes[self._activeVibeIdx + 1]);
               // FIX (áudio de outro vídeo continuava tocando e o slide novo
               // ficava preto): ao eleger o vídeo ativo, pausa e rebobina
               // qualquer outro vídeo das Vibes que ainda esteja tocando.
