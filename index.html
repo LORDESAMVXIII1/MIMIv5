@@ -4074,7 +4074,7 @@ var CFG = {
 // Lê /config/app no Firestore (leitura pública) logo no boot. Se
 // maintenanceMode=true OU a versão deste arquivo < minVersion, bloqueia
 // a tela — sem depender de re-upload no GitHub Pages.
-var APP_VERSION = "2026.08.23.2";
+var APP_VERSION = "2026.08.23.3";
 
 // ─── AUTO-ATUALIZAÇÃO ───────────────────────────────────────
 // Problema antigo: depois de subir um index.html novo no GitHub Pages,
@@ -5143,7 +5143,18 @@ function fsQuery(collection, field, op, value, convoId) {
       });
   }
   if (typeof SupabaseDB === "undefined") return viaFirebase({ message: "sem SupabaseDB" });
-  return viaSupabase().catch(function(err){
+  return viaSupabase().then(function(rows){
+    // 🛟 Mesma lógica de fsList: resultado vazio do Supabase antes do
+    // backfill confirmado é ambíguo (pode ser "realmente vazio" ou
+    // "esses documentos ainda só existem no Firebase, nunca foram
+    // espelhados"). Sem isso, vibeChunks/storyChunks antigos (só no
+    // Firebase) voltavam [] do Supabase, o vídeo ficava sem videoUrl e
+    // a vibe/story inteira sumia em silêncio do feed.
+    if ((!rows || rows.length === 0) && !_isBackfillConfirmed() && !_isFirebaseThrottled()) {
+      return viaFirebase({ message: "lista vazia no Supabase, conferindo Firebase" }).catch(function(){ return rows || []; });
+    }
+    return rows;
+  }).catch(function(err){
     console.warn("⚠️ fsQuery('"+collection+"') falhou no Supabase, tentando Firebase:", err && err.message || err);
     return viaFirebase(err);
   });
