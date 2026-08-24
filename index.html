@@ -10437,6 +10437,17 @@ function optimizeCloudinaryVideoUrl(src) {
   // quanto pros que já estavam salvos antes dessa mudança.
   return src.replace("/upload/", "/upload/q_auto,f_auto,w_720,c_limit/");
 }
+// FIX (fluidez das Vibes): gera uma miniatura (frame do próprio vídeo) pra
+// usar como poster do <video>. Sem isso, enquanto o vídeo ainda não
+// carregou nada, a tela fica preta — parecendo travado/estático mesmo
+// quando só está terminando de buffer. so_0 pede o frame do segundo 0.
+function cloudinaryVideoPosterUrl(src) {
+  if (!src || src.indexOf("res.cloudinary.com") === -1) return "";
+  var withTransform = src.indexOf("/upload/q_auto") !== -1
+    ? src
+    : src.replace("/upload/", "/upload/q_auto,f_auto,w_720,c_limit/");
+  return withTransform.replace("/upload/", "/upload/so_0/").replace(/\.[a-zA-Z0-9]+($|\?)/, ".jpg$1");
+}
 function renderMimiPlayer(src, postId) {
   var optimizedSrc = optimizeCloudinaryVideoUrl(src);
   return '<div class="advanced-player" id="player-'+postId+'">' +
@@ -21329,8 +21340,17 @@ var VibesModule = {
         var vibeVideoSrcAttr = isNearVibe
           ? ' src="'+optimizedVideoUrl+'"'
           : ' data-src="'+optimizedVideoUrl+'"';
+        // FIX (fluidez): antes TODO vídeo nascia com preload="metadata" (só
+        // baixa duração/tamanho, não o conteúdo) — o vídeo atual e o próximo
+        // agora pedem preload="auto" pra já ir baixando o conteúdo de verdade
+        // enquanto o usuário ainda está assistindo o de agora, e ganham um
+        // poster (frame do próprio vídeo) pra não ficar tela preta enquanto
+        // isso. Os distantes continuam sem baixar nada (preload="none").
+        var vibePreloadAttr = isNearVibe ? "auto" : "none";
+        var vibePosterUrl = cloudinaryVideoPosterUrl(vibe.videoUrl);
+        var vibePosterAttr = vibePosterUrl ? ' poster="'+vibePosterUrl+'"' : '';
         html += '<div class="vibe-slide" data-vibe-idx="'+idx+'">' +
-          '<video class="vibe-video" id="vibeVideo-'+idx+'"'+vibeVideoSrcAttr+' playsinline webkit-playsinline loop preload="metadata"></video>' +
+          '<video class="vibe-video" id="vibeVideo-'+idx+'"'+vibeVideoSrcAttr+vibePosterAttr+' playsinline webkit-playsinline loop preload="'+vibePreloadAttr+'"></video>' +
           '<div class="vibe-mute-layer"></div>' +
           '<div class="vibe-doubletap-heart" id="vibeDTHeart-'+idx+'">'+sparkleIcon("like",90,"#fff")+'</div>' +
           '<button class="mute-btn" style="bottom:auto;top:calc(env(safe-area-inset-top,0px) + 14px);" data-vibe-mute-idx="'+idx+'" title="Som">' +
@@ -21737,17 +21757,23 @@ var VibesModule = {
                 if (nextVideo && !nextVideo.getAttribute("src")) {
                   var pendingSrc = nextVideo.getAttribute("data-src");
                   if (pendingSrc) {
+                    nextVideo.preload = "auto"; // FIX: senão herdava preload="none" do render inicial e não baixava nada
                     nextVideo.src = pendingSrc;
                     nextVideo.load();
                   }
                 }
               }
-              video.muted = false; // tenta tocar com som, igual ao player do Feed
+              // FIX (fluidez): antes TODO vídeo tentava tocar com som primeiro,
+              // o navegador bloqueava, e só então caía pro mudo — isso piscava/
+              // atrasava a cada troca, mesmo quando o app já sabia (do vídeo
+              // anterior) que o som ia ser bloqueado. Agora usa a preferência já
+              // conhecida (self._vibesMuted) direto, sem tentar de novo à toa.
+              video.muted = (self._vibesMuted !== false);
               var playPromise = video.play();
               if (playPromise && playPromise.catch) {
                 playPromise.catch(function() {
-                  // Navegador bloqueou o autoplay com som — toca mudo e avisa na tela
                   video.muted = true;
+                  self._vibesMuted = true;
                   video.play().catch(function() {});
                   var iconEl = document.getElementById("vibeMuteIcon-"+idx);
                   if (iconEl) iconEl.innerHTML = sparkleIcon("volumeOff", 20);
@@ -21805,6 +21831,7 @@ var VibesModule = {
         var video = document.getElementById("vibeVideo-"+idx);
         if (!video) return;
         video.muted = !video.muted;
+        self._vibesMuted = video.muted; // lembra a escolha pros próximos vídeos
         var iconEl = document.getElementById("vibeMuteIcon-"+idx);
         if (iconEl) iconEl.innerHTML = sparkleIcon(video.muted ? "volumeOff" : "volumeOn", 20);
       });
