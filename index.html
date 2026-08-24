@@ -1545,6 +1545,22 @@
      manualmente pelo JS (função renderTurnstileWidget) porque a tela de
      login é montada dinamicamente via innerHTML. -->
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+<!-- Detecção do wrapper nativo (html2app/WebView) — usada só pra pular o
+     captcha Turnstile dentro do app empacotado (bug conhecido: o widget
+     trava em "Verificando..." dentro de WebView nativo mesmo com o domínio
+     liberado no Cloudflare). window.__MIMI_NATIVE_APP__ começa false e só
+     vira true se o bridge confirmar que estamos de fato dentro do WebView
+     do app — na versão web/PWA (navegador normal) o captcha continua
+     valendo normalmente. -->
+<script>window.__MIMI_NATIVE_APP__ = false;</script>
+<script type="module">
+  try {
+    var mod = await import("https://esm.sh/@yandeu/js-bridge");
+    window.__MIMI_NATIVE_APP__ = !!(mod && mod.WebView && mod.WebView.isWebView);
+  } catch (e) {
+    console.warn("⚠️ Bridge html2app não carregou — assumindo versão web.", e);
+  }
+</script>
 <!-- Supabase JS — usado só pro canal de Realtime das chamadas de voz
      (avisa na hora quando uma ligação chega/muda de status, em vez de
      ficar perguntando pro banco a cada poucos segundos). O resto do
@@ -1581,7 +1597,7 @@
 // index.html novo tem que vir junto com um version.json com o MESMO
 // valor de APP_VERSION abaixo. Os dois sobem juntos no GitHub Pages,
 // lado a lado, na mesma pasta.
-var APP_VERSION = "2026.08.24.1";
+var APP_VERSION = "2026.08.24.2";
 
 // Compara a versão rodando agora com a que está publicada em version.json
 // (arquivo pequeno e rápido de checar, ao lado do index.html — checar um
@@ -19364,11 +19380,21 @@ var authMode = "login";
 var _turnstileWidgetId = null;
 var _turnstileToken = null;
 
+// true quando o app está rodando dentro do wrapper nativo (html2app/
+// WebView) — nesse ambiente o Turnstile trava em "Verificando..." mesmo
+// com o domínio liberado (bug conhecido do Cloudflare em WebViews
+// nativos), então o captcha é pulado só aí. A versão web/PWA continua
+// exigindo o desafio normalmente.
+function isNativeAppWrapper() {
+  return !!window.__MIMI_NATIVE_APP__;
+}
+
 // Renderiza (ou re-renderiza) o widget dentro do container. Precisa ser
 // chamado manualmente porque o HTML do formulário é injetado via
 // innerHTML — o auto-render por data-attribute do Turnstile só funciona
 // em elementos que já existiam no parse inicial da página.
 function renderTurnstileWidget() {
+  if (isNativeAppWrapper()) return;
   var slot = document.querySelector("[data-turnstile-slot]");
   if (!slot || typeof turnstile === "undefined") return;
   if (!CFG.turnstileSiteKey || CFG.turnstileSiteKey.indexOf("COLE_AQUI") === 0) {
@@ -19451,12 +19477,13 @@ function renderAuthPage() {
         '</div>' +
         (authMode==="register" ? '<span class="fp-text" style="display:flex;align-items:center;gap:5px;font-size:12px;margin:-6px 0 4px 2px;color:var(--muted);" data-pw-hint><span data-pw-hint-icon style="display:inline-flex;flex-shrink:0;">'+icoSvg("lockReset",13,"var(--muted)")+'</span><span data-pw-hint-text>Use 10+ caracteres, maiúscula, minúscula, número e símbolo.</span></span>' : "") +
         (authMode==="login" ? '<span class="auth-forgot">Esqueceu a senha?</span>' : "") +
+        (isNativeAppWrapper() ? "" :
         '<div class="turnstile-frame" style="margin:6px 0 2px;">' +
           '<div class="turnstile-frame-inner">' +
             '<div id="turnstile-container" data-turnstile-slot style="display:flex;justify-content:center;width:100%;max-width:100%;overflow:hidden;"></div>' +
             '<div class="turnstile-loading" data-turnstile-loading><span class="turnstile-loading-dot"></span><span class="turnstile-loading-dot"></span><span class="turnstile-loading-dot"></span><span>Verificando…</span></div>' +
           '</div>' +
-        '</div>' +
+        '</div>') +
         '<button class="auth-submit" data-submit-auth>' +
           '<span class="auth-submit-label">'+(authMode==="login"?"Entrar":"Criar conta")+'</span>' +
           '<span class="auth-submit-arrow">'+icoSvg("arrowRight",15,"#fff")+'</span>' +
@@ -19562,6 +19589,7 @@ function bindAuthPage() {
   // não carregou (script "async defer" pode demorar), tenta de novo em
   // meio segundo — mesma estratégia usada pro Firebase no App Check.
   (function ensureTurnstileRendered() {
+    if (isNativeAppWrapper()) return;
     if (typeof turnstile !== "undefined") {
       renderTurnstileWidget();
     } else {
@@ -19639,7 +19667,7 @@ function bindAuthPage() {
     // Turnstile: exige o desafio resolvido antes de tentar autenticar.
     // Se a chave/worker ainda não estiverem configurados (placeholders),
     // verifyTurnstileToken() deixa passar — ver comentário na função.
-    var turnstileConfigured = CFG.turnstileSiteKey && CFG.turnstileSiteKey.indexOf("COLE_AQUI") !== 0;
+    var turnstileConfigured = CFG.turnstileSiteKey && CFG.turnstileSiteKey.indexOf("COLE_AQUI") !== 0 && !isNativeAppWrapper();
     if (turnstileConfigured && !_turnstileToken) {
       showToast("Confirme o desafio de segurança antes de continuar.");
       return;
@@ -19661,7 +19689,11 @@ function bindAuthPage() {
       _turnstileToken = null;
     }
 
-    verifyTurnstileToken(_turnstileToken).then(function(result) {
+    var turnstileCheck = isNativeAppWrapper()
+      ? Promise.resolve({ success: true })
+      : verifyTurnstileToken(_turnstileToken);
+
+    turnstileCheck.then(function(result) {
       if (!result.success) {
         resetSubmitUi();
         if (result.error === "rate_limited") {
