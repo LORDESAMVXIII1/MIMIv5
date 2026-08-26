@@ -1598,7 +1598,7 @@
 // index.html novo tem que vir junto com um version.json com o MESMO
 // valor de APP_VERSION abaixo. Os dois sobem juntos no GitHub Pages,
 // lado a lado, na mesma pasta.
-var APP_VERSION = "2026.08.24.5";
+var APP_VERSION = "2026.08.26.1";
 
 // Compara a versão rodando agora com a que está publicada em version.json
 // (arquivo pequeno e rápido de checar, ao lado do index.html — checar um
@@ -22088,6 +22088,15 @@ render = function() {
   window.addEventListener("touchend", onTouchEnd, { passive:true });
   window.addEventListener("touchcancel", onTouchEnd, { passive:true });
 })();
+</script>
+<script>
+  // Registra o service worker do PWA (gerado pelo PWABuilder), sem quebrar
+  // navegadores sem suporte nem o app empacotado (html2app).
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", function () {
+      navigator.serviceWorker.register("pwabuilder-sw.js").catch(function () {});
+    });
+  }
 </script>
 </body>
 </html>
