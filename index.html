@@ -1599,7 +1599,7 @@
 // index.html novo tem que vir junto com um version.json com o MESMO
 // valor de APP_VERSION abaixo. Os dois sobem juntos no GitHub Pages,
 // lado a lado, na mesma pasta.
-var APP_VERSION = "2026.08.26.4";
+var APP_VERSION = "2026.08.26.6";
 
 // Compara a versão rodando agora com a que está publicada em version.json
 // (arquivo pequeno e rápido de checar, ao lado do index.html — checar um
@@ -1895,16 +1895,13 @@ function sparkleIcon(name, size, color, active) {
     '</svg>';
 }
 
-// Ícone "mais opções" do Vibe: três estrelas de 4 pontas retas (sem curva),
-// no lugar dos três pontinhos padrão — combina com o resto dos ícones
-// "sparkle" do app.
+// Ícone "mais opções" do Vibe: chevron para baixo, minimalista, no lugar
+// das três estrelas — combina com o resto dos ícones em traço do app.
 function vibeMoreStarsIcon(size, color) {
   size = size || 28;
   color = color || "#fff";
-  return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 24 24" style="flex-shrink:0;">' +
-      '<polygon points="5,5.5 5.9,7.6 8,8.5 5.9,9.4 5,11.5 4.1,9.4 2,8.5 4.1,7.6" fill="'+color+'"/>' +
-      '<polygon points="12,4 13.1,6.5 15.6,7.5 13.1,8.5 12,11 10.9,8.5 8.4,7.5 10.9,6.5" fill="'+color+'"/>' +
-      '<polygon points="19,5.5 19.9,7.6 22,8.5 19.9,9.4 19,11.5 18.1,9.4 16,8.5 18.1,7.6" fill="'+color+'"/>' +
+  return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 24 24" fill="none" stroke="'+color+'" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;">' +
+      '<path d="M6 10l6 6 6-6"/>' +
     '</svg>';
 }
 
@@ -19574,6 +19571,17 @@ function onAuthSuccess(u) {
   }).catch(function(){});
   startMessageCleanupSchedule(); // repete a cada 1h enquanto o app estiver aberto
 
+  // ── Vibes: pré-carrega em segundo plano ───────────────
+  // FIX (demora ao abrir Vibes): antes a lista de vibes só começava a ser
+  // buscada quando a pessoa abria a aba, então ela via "Carregando vibes…"
+  // e só depois disso o primeiro vídeo começava a baixar — dois passos em
+  // série. Igual ao Reels do Instagram, que já deixa o conteúdo pronto
+  // antes de você tocar na aba: agora a busca começa aqui, junto com posts/
+  // stories/conversas, para que ao abrir Vibes a lista (e o primeiro vídeo)
+  // já estejam prontos ou a caminho. Não mexe em nada do ranking, filtro ou
+  // diversidade — só adianta o ponto de partida da mesma busca de sempre.
+  if (state.user && !VibesModule._userLoaded) VibesModule.loadUserVibes();
+
   // ── Presença ─────────────────────────────────────────
   startPresence();
   startStoryPolling();
@@ -21255,7 +21263,14 @@ var VibesModule = {
       vibes = _diversifyByAuthor(vibes, function(v) { return v.userId; }, 2, 6);
       self.vibes = vibes;
       self._loading = false;
-      render(); // perfil e outras telas também dependem de VibesModule.vibes (ver userVibes)
+      // FIX: agora essa busca também pode terminar em segundo plano (ver
+      // onAuthSuccess) enquanto a pessoa está em outra tela — reconstruir a
+      // tela inteira nesse momento é o mesmo tipo de bug já corrigido em
+      // outros lugares (destrói campo em edição, corta vídeo tocando etc.).
+      // Só força o render cheio se a pessoa já estiver mesmo na aba Vibes
+      // esperando a lista; nos outros casos os dados já ficam prontos e a
+      // tela normal (render/backgroundRender) pega isso na próxima passada.
+      if (state.page === "vibes") render(); else backgroundRender();
     }).catch(function(err) {
       console.error("Não foi possível carregar suas vibes:", err);
       showToast(toastWithIcon("Não foi possível carregar suas vibes agora.", "warning", "before"), true);
