@@ -1476,9 +1476,10 @@
   .vibe-avatar { width:34px; height:34px; border-radius:50%; background:linear-gradient(135deg,var(--accent),var(--accentL)); border:1.5px solid #fff; flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:800; color:#fff; }
   .vibe-info .uname { font-weight:700; font-size:14px; text-shadow:0 1px 4px rgba(0,0,0,.5); }
   .vibe-info .cap { font-size:13px; line-height:1.4; text-shadow:0 1px 4px rgba(0,0,0,.5); opacity:.95; max-width:100%; }
-  .vibe-side { position:absolute; right:12px; bottom:calc(env(safe-area-inset-bottom,0px) + 158px); z-index:10; display:flex; flex-direction:column; align-items:center; gap:26px; }
-  .vibe-side button { background:none; border:none; color:#fff; display:flex; flex-direction:column; align-items:center; justify-content:flex-start; gap:5px; min-height:51px; font-size:12px; font-weight:700; text-shadow:0 1px 4px rgba(0,0,0,.5); cursor:pointer; }
+  .vibe-side { position:absolute; right:12px; bottom:calc(env(safe-area-inset-bottom,0px) + 158px); z-index:10; display:flex; flex-direction:column; align-items:center; gap:24px; }
+  .vibe-side button { position:relative; background:none; border:none; color:#fff; display:flex; align-items:center; justify-content:center; width:32px; height:32px; font-size:12px; font-weight:700; text-shadow:0 1px 4px rgba(0,0,0,.5); cursor:pointer; }
   .vibe-side button:hover { opacity:.8; }
+  .vibe-side button .like-count, .vibe-side button .fire-count, .vibe-side button .comment-count { position:absolute; top:100%; left:50%; transform:translateX(-50%); margin-top:3px; white-space:nowrap; }
   .heart-pulse { animation:pulse .35s ease; }
   @keyframes pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.28)} }
   /* Coração do duplo toque para curtir (exclusivo das Vibes) */
@@ -1598,7 +1599,7 @@
 // index.html novo tem que vir junto com um version.json com o MESMO
 // valor de APP_VERSION abaixo. Os dois sobem juntos no GitHub Pages,
 // lado a lado, na mesma pasta.
-var APP_VERSION = "2026.08.26.2";
+var APP_VERSION = "2026.08.26.3";
 
 // Compara a versão rodando agora com a que está publicada em version.json
 // (arquivo pequeno e rápido de checar, ao lado do index.html — checar um
