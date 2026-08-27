@@ -1599,7 +1599,7 @@
 // index.html novo tem que vir junto com um version.json com o MESMO
 // valor de APP_VERSION abaixo. Os dois sobem juntos no GitHub Pages,
 // lado a lado, na mesma pasta.
-var APP_VERSION = "2026.08.26.9";
+var APP_VERSION = "2026.08.26.10";
 
 // Compara a versão rodando agora com a que está publicada em version.json
 // (arquivo pequeno e rápido de checar, ao lado do index.html — checar um
@@ -2903,6 +2903,16 @@ function vibeAsProfileItem(v) {
     likedBy: v.likedBy || [], createdAt: v.createdAt,
     time: _relTime(new Date(v.createdAt||Date.now()).toISOString())
   };
+}
+// Protege as miniaturas de vibes no perfil: se a vibe original ainda é
+// "pendente" (legada, dividida em partes, conteúdo não baixado), dispara
+// o carregamento sob demanda (mesmo helper do feed de Vibes) e deixa a
+// tela normal (backgroundRender, ver ensureVibeContentLoaded) atualizar a
+// miniatura sozinha quando o vídeo chegar.
+function ensureVibeProfileContentLoaded(p) {
+  if (!p || !p._isVibe || p.video) return;
+  var v = VibesModule.vibes.find(function(vv){ return vv.id === p.id; });
+  if (v) VibesModule.ensureVibeContentLoaded(v);
 }
 // Timestamp comparável (ms) pra ordenar posts (createdAt em ISO) e vibes
 // (createdAt já em ms) juntos numa lista só, do mais recente pro mais antigo.
@@ -6263,26 +6273,28 @@ var FB = {
     });
   },
 
-  // Carrega vibes do Firestore, remontando vídeos divididos em partes.
+  // Carrega vibes do Firestore. FIX (performance): antes, pra montar a
+  // lista, esperava o Promise.all do conteúdo COMPLETO de TODAS as vibes
+  // divididas em partes (vibeChunks — vídeo legado salvo em base64) antes
+  // de resolver qualquer coisa; então mesmo vibes novas (URL leve do
+  // Cloudinary, já prontas na hora) ficavam presas atrás do download de
+  // vídeos grandes antigos. Agora a lista resolve na hora, com as vibes
+  // legadas em base64 entrando como "pendentes" (videoUrl null, chunked:
+  // true) — o conteúdo delas é buscado sob demanda por
+  // VibesModule.ensureVibeContentLoaded, sem travar a lista inteira.
   // `since` opcional para trazer só as vibes novas desde a última sincronização.
   loadVibes: function(since) {
     if (!_idToken) return Promise.resolve([]);
     var docsPromise = since ? fsListIncremental("vibes", since) : fsList("vibes");
     return docsPromise.then(function(docs){
       docs = docs || [];
-      return Promise.all(docs.map(function(d){
-        if (!d.chunked) return d;
-        return fsQuery("vibeChunks","vibeId","EQUAL",d._id).then(function(chunks){
-          chunks = (chunks||[]).sort(function(a,b){ return (a.index||0)-(b.index||0); });
-          d.videoUrl = chunks.map(function(c){ return c.data || ""; }).join("");
-          return d;
-        }).catch(function(){ d.videoUrl = null; return d; });
-      }));
-    }).then(function(fullDocs){
       // moderação (3.1): mesmo critério do loadPosts — some da lista dos
-      // outros, mas o autor continua vendo a própria vibe.
-      return fullDocs.filter(function(d){
-        if (!d.videoUrl) return false;
+      // outros, mas o autor continua vendo a própria vibe. Uma vibe
+      // dividida em partes fica na lista mesmo sem o conteúdo ainda
+      // baixado (ela vira "pendente" — só uma doc sem videoUrl de verdade
+      // E sem chunked conta como quebrada e é descartada).
+      return docs.filter(function(d){
+        if (!d.chunked && !d.videoUrl) return false;
         if (d.moderationStatus === "removed" || d.moderationStatus === "under_review") {
           return d.authorId === ME_ID;
         }
@@ -6296,7 +6308,8 @@ var FB = {
           username: u.name || "Usuário",
           avatar: u.avatar || "",
           caption: d.caption || "",
-          videoUrl: d.videoUrl,
+          videoUrl: d.chunked ? null : d.videoUrl,
+          chunked: !!d.chunked,
           likedBy: likedBy,
           likes: likedBy.length,
           liked: likedBy.indexOf(ME_ID) !== -1,
@@ -6315,6 +6328,21 @@ var FB = {
     }).catch(function(err){
       console.error("loadVibes error:", err);
       return Promise.reject(err);
+    });
+  },
+
+  // Busca e remonta o conteúdo (vibeChunks) de UMA vibe dividida em partes.
+  // Extraído do antigo loadVibes pra poder ser chamado sob demanda, vibe
+  // por vibe, em vez de travar a lista inteira esperando todo mundo.
+  loadVibeContent: function(vibeId) {
+    if (!vibeId) return Promise.resolve(null);
+    return fsQuery("vibeChunks","vibeId","EQUAL",vibeId).then(function(chunks){
+      chunks = (chunks||[]).sort(function(a,b){ return (a.index||0)-(b.index||0); });
+      if (!chunks.length) return null;
+      return chunks.map(function(c){ return c.data || ""; }).join("");
+    }).catch(function(err){
+      console.error("loadVibeContent error:", err);
+      return null;
     });
   },
 
@@ -11300,7 +11328,9 @@ function renderVibeProfileCard(v) {
     '</div>' +
     (v.text ? '<p class="post-text">'+esc(v.text)+'</p>' : "") +
     '<div style="position:relative;overflow:hidden;background:#000;aspect-ratio:9/16;max-height:70vh;width:100%;">' +
-      '<video src="'+esc(v.video)+'" muted preload="metadata" playsinline style="width:100%;height:100%;object-fit:cover;display:block;"></video>' +
+      (v.video
+        ? '<video src="'+esc(v.video)+'" muted preload="metadata" playsinline style="width:100%;height:100%;object-fit:cover;display:block;"></video>'
+        : '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;">'+icoSvg("sparkle",30,"var(--accentL,#ffb3d1)",true)+'</div>') +
       '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;">'+icoSvg("play",34,"#fff",true)+'</div>' +
     '</div>' +
     '<div class="post-actions">' +
@@ -16635,12 +16665,13 @@ function renderProfilePage(userId) {
     if (profileTab === "posts" || profileTab === "músicas") {
       // Lista de posts (com e sem mídia) / lista de publicações de música
       html += '<div>';
-      items.forEach(function(p) { html += p._isVibe ? renderVibeProfileCard(p) : renderPostCard(p); });
+      items.forEach(function(p) { ensureVibeProfileContentLoaded(p); html += p._isVibe ? renderVibeProfileCard(p) : renderPostCard(p); });
       html += '</div>';
     } else {
       // Grid de mídia para abas mídia/curtidas/salvos
       html += '<div class="explore-grid" style="padding:3px;">';
       items.forEach(function(p) {
+        ensureVibeProfileContentLoaded(p);
         var thumb = p.img || (p.video ? videoThumbUrl(p.video) : "");
         var mediaHtml;
         if (thumb) {
@@ -21348,6 +21379,56 @@ var VibesModule = {
     });
   },
 
+  // Busca sob demanda o conteúdo (vídeo) de UMA vibe legada dividida em
+  // partes (chunked) que ainda não foi baixado. Reutilizável — chamado
+  // tanto pelo feed de Vibes (vídeo atual/próximo) quanto pelas miniaturas
+  // de vibes no perfil. Atualiza só o que precisa quando o vídeo chega,
+  // sem reconstruir a tela inteira.
+  ensureVibeContentLoaded: function(vibe) {
+    if (!vibe || !vibe.chunked || vibe.videoUrl || vibe._loadingContent) return;
+    vibe._loadingContent = true;
+    var self = this;
+    FB.loadVibeContent(vibe.id).then(function(videoUrl){
+      vibe._loadingContent = false;
+      if (!videoUrl) { vibe._contentFailed = true; return; }
+      vibe.videoUrl = videoUrl;
+      if (state.page === "vibes") self.updateVibeSlideVideo(vibe);
+      else backgroundRender();
+    }).catch(function(){
+      vibe._loadingContent = false;
+      vibe._contentFailed = true;
+    });
+  },
+
+  // Injeta o <video> real (src/poster) de uma vibe cujo conteúdo acabou de
+  // chegar, sem chamar render() — evita cortar o vídeo que já está
+  // tocando em outro slide (mesmo cuidado do fetchMissingUser/backgroundRender).
+  updateVibeSlideVideo: function(vibe) {
+    var idx = this.vibes.indexOf(vibe);
+    if (idx === -1 || !vibe.videoUrl) return;
+    var videoEl = document.getElementById("vibeVideo-" + idx);
+    if (!videoEl) return;
+    var optimizedVideoUrl = optimizeCloudinaryVideoUrl(vibe.videoUrl);
+    var posterUrl = cloudinaryVideoPosterUrl(vibe.videoUrl);
+    if (posterUrl) videoEl.poster = posterUrl;
+    var activeVibeIdx = (typeof this._activeVibeIdx === "number") ? this._activeVibeIdx : 0;
+    var isNearVibe = (idx === activeVibeIdx || idx === activeVibeIdx + 1);
+    if (isNearVibe) {
+      videoEl.preload = "auto";
+      videoEl.src = optimizedVideoUrl;
+      videoEl.load();
+      if (idx === activeVibeIdx) {
+        videoEl.muted = (this._vibesMuted !== false);
+        var p = videoEl.play();
+        if (p && p.catch) p.catch(function(){});
+      }
+    } else {
+      videoEl.setAttribute("data-src", optimizedVideoUrl);
+    }
+    var overlay = document.getElementById("vibeLoadingOverlay-" + idx);
+    if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+  },
+
   // Busca o perfil real de quem publicou a vibe (foto, moldura etc.) quando
   // ele ainda não está em USERS, e re-renderiza assim que chegar.
   fetchMissingUser: function(uid) {
@@ -21434,22 +21515,32 @@ var VibesModule = {
         if (!vUser && vibe.userId) self.fetchMissingUser(vibe.userId);
         var vAvatar = (vUser && vUser.avatar) || vibe.avatar || ("https://api.dicebear.com/7.x/avataaars/svg?seed=" + (vibe.userId || vibe.username));
         var vFrame = vUser ? getUserFrame(vUser) : null;
-        var optimizedVideoUrl = optimizeCloudinaryVideoUrl(vibe.videoUrl);
         var isNearVibe = (idx === activeVibeIdx || idx === activeVibeIdx + 1);
-        var vibeVideoSrcAttr = isNearVibe
-          ? ' src="'+optimizedVideoUrl+'"'
-          : ' data-src="'+optimizedVideoUrl+'"';
+        // Vibe legada dividida em partes cujo conteúdo ainda não chegou:
+        // fica na lista (posição/ranking intactos), só sem src de vídeo
+        // ainda — dispara a busca sob demanda se estiver perto do que a
+        // pessoa está vendo, e mostra um overlay de carregamento em vez de
+        // tela preta/quebrada.
+        var hasVideoContent = !!vibe.videoUrl;
+        if (isNearVibe && !hasVideoContent && vibe.chunked) self.ensureVibeContentLoaded(vibe);
+        var optimizedVideoUrl = hasVideoContent ? optimizeCloudinaryVideoUrl(vibe.videoUrl) : "";
+        var vibeVideoSrcAttr = !hasVideoContent ? ''
+          : (isNearVibe ? ' src="'+optimizedVideoUrl+'"' : ' data-src="'+optimizedVideoUrl+'"');
         // FIX (fluidez): antes TODO vídeo nascia com preload="metadata" (só
         // baixa duração/tamanho, não o conteúdo) — o vídeo atual e o próximo
         // agora pedem preload="auto" pra já ir baixando o conteúdo de verdade
         // enquanto o usuário ainda está assistindo o de agora, e ganham um
         // poster (frame do próprio vídeo) pra não ficar tela preta enquanto
         // isso. Os distantes continuam sem baixar nada (preload="none").
-        var vibePreloadAttr = isNearVibe ? "auto" : "none";
-        var vibePosterUrl = cloudinaryVideoPosterUrl(vibe.videoUrl);
+        var vibePreloadAttr = (isNearVibe && hasVideoContent) ? "auto" : "none";
+        var vibePosterUrl = hasVideoContent ? cloudinaryVideoPosterUrl(vibe.videoUrl) : "";
         var vibePosterAttr = vibePosterUrl ? ' poster="'+vibePosterUrl+'"' : '';
+        var vibeLoadingOverlay = (!hasVideoContent && vibe.chunked)
+          ? '<div class="vibe-loading-overlay" id="vibeLoadingOverlay-'+idx+'" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#000;">'+icoSvg("sparkle",36,"var(--accentL,#ffb3d1)",true)+'</div>'
+          : '';
         html += '<div class="vibe-slide" data-vibe-idx="'+idx+'">' +
           '<video class="vibe-video" id="vibeVideo-'+idx+'"'+vibeVideoSrcAttr+vibePosterAttr+' playsinline webkit-playsinline loop preload="'+vibePreloadAttr+'"></video>' +
+          vibeLoadingOverlay +
           '<div class="vibe-mute-layer"></div>' +
           '<div class="vibe-doubletap-heart" id="vibeDTHeart-'+idx+'">'+sparkleIcon("like",90,"#fff")+'</div>' +
           '<button class="mute-btn" style="bottom:auto;top:calc(env(safe-area-inset-top,0px) + 14px);" data-vibe-mute-idx="'+idx+'" title="Som">' +
@@ -21892,6 +21983,13 @@ var VibesModule = {
                     }
                   }
                 });
+                // Vibe legada (chunked) que virou "atual" ou "próxima" só
+                // depois de mais scroll (fora da janela que já disparou o
+                // carregamento no render inicial) — garante que o conteúdo
+                // dela também seja buscado, não só o <video> preparado.
+                if (vibe && vibe.chunked && !vibe.videoUrl) self.ensureVibeContentLoaded(vibe);
+                var nextVibe = self.vibes[self._activeVibeIdx + 1];
+                if (nextVibe && nextVibe.chunked && !nextVibe.videoUrl) self.ensureVibeContentLoaded(nextVibe);
               }
               if (vibe && vibe.id) {
                 self._vibeViewStarts[vibe.id] = Date.now();
