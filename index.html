@@ -1599,7 +1599,7 @@
 // index.html novo tem que vir junto com um version.json com o MESMO
 // valor de APP_VERSION abaixo. Os dois sobem juntos no GitHub Pages,
 // lado a lado, na mesma pasta.
-var APP_VERSION = "2026.08.26.7";
+var APP_VERSION = "2026.08.26.9";
 
 // Compara a versão rodando agora com a que está publicada em version.json
 // (arquivo pequeno e rápido de checar, ao lado do index.html — checar um
@@ -21204,9 +21204,68 @@ var VibesModule = {
     this.vibes = [];
   },
 
+  // Cache local somente da lista já ordenada. Ele não substitui a busca no
+  // servidor: serve a última lista imediatamente e a rede a atualiza logo
+  // depois. Vídeos antigos em base64 não entram no cache para não estourar o
+  // limite do localStorage nem alterar a lista parcialmente.
+  _cacheKey: function() {
+    return "mimi_vibes_feed_v1_" + ((state.user && state.user.uid) || ME_ID || "");
+  },
+  restoreCachedVibes: function() {
+    var accountId = (state.user && state.user.uid) || ME_ID || "";
+    if (!accountId || this._cacheRestoredFor === accountId) return;
+    this._cacheRestoredFor = accountId;
+    try {
+      var cached = JSON.parse(localStorage.getItem(this._cacheKey()) || "null");
+      if (!cached || !Array.isArray(cached.vibes) || !cached.vibes.length) return;
+      // Descarta snapshots muito antigos; conteúdo apagado não deve reaparecer
+      // indefinidamente quando o aparelho passa vários dias sem conexão.
+      if (!cached.savedAt || Date.now() - cached.savedAt > 24 * 60 * 60 * 1000) return;
+      this.vibes = cached.vibes.filter(function(v) {
+        return v && v.id && v.videoUrl && !isVibeNotInterested(v.id) && !isUserBlocked(v.userId);
+      });
+    } catch (e) {}
+  },
+  cacheVibes: function(vibes) {
+    try {
+      // Só grava snapshots completos compostos por URLs leves. Se ainda
+      // existir uma vibe legada em data/base64, não grava uma lista parcial.
+      var cacheable = vibes.length > 0 && vibes.every(function(v) {
+        return typeof v.videoUrl === "string" && v.videoUrl.length < 4096;
+      });
+      if (!cacheable) return;
+      localStorage.setItem(this._cacheKey(), JSON.stringify({ savedAt: Date.now(), vibes: vibes }));
+    } catch (e) {}
+  },
+  warmFirstVibe: function() {
+    var first = this.vibes[0];
+    if (!first || !first.videoUrl || this._warmedVibeId === first.id) return;
+    this._warmedVibeId = first.id;
+    // O pré-carregamento anterior adiantava apenas a consulta da lista. O
+    // download do primeiro vídeo só começava depois do toque na aba Vibes.
+    // Este elemento invisível faz o navegador buscar mídia e poster durante
+    // o uso do Feed, sem tocar áudio e sem interferir no player visível.
+    var old = this._warmVideo;
+    if (old) { try { old.pause(); old.removeAttribute("src"); old.load(); } catch (e) {} }
+    var video = document.createElement("video");
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "auto";
+    video.setAttribute("aria-hidden", "true");
+    video.style.cssText = "position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;left:-10px;top:-10px";
+    var poster = cloudinaryVideoPosterUrl(first.videoUrl);
+    if (poster) video.poster = poster;
+    video.src = optimizeCloudinaryVideoUrl(first.videoUrl);
+    document.body.appendChild(video);
+    this._warmVideo = video;
+    video.load();
+  },
+
   loadUserVibes: function() {
     if (!state.user) return;
     var self = this;
+    self.restoreCachedVibes();
+    if (self.vibes.length) self.warmFirstVibe();
     // FIX: se o token de autenticação ainda não chegou (comum logo após o
     // login), não marca como "carregado" — tenta de novo em breve, em vez
     // de ficar com a lista vazia até a página inteira ser recarregada.
@@ -21271,6 +21330,8 @@ var VibesModule = {
       vibes = _diversifyByAuthor(vibes, function(v) { return v.userId; }, 2, 6);
       self.vibes = vibes;
       self._loading = false;
+      self.cacheVibes(vibes);
+      self.warmFirstVibe();
       // FIX: agora essa busca também pode terminar em segundo plano (ver
       // onAuthSuccess) enquanto a pessoa está em outra tela — reconstruir a
       // tela inteira nesse momento é o mesmo tipo de bug já corrigido em
@@ -22129,11 +22190,16 @@ render = function() {
 <script>
   // Registra o service worker do PWA (gerado pelo PWABuilder), sem quebrar
   // navegadores sem suporte nem o app empacotado (html2app).
-  if ("serviceWorker" in navigator) {
-    window.addEventListener("load", function () {
-      navigator.serviceWorker.register("pwabuilder-sw.js").catch(function () {});
-    });
-  }
+  // Em iframes sandbox (pré-visualizações) apenas LER navigator.serviceWorker
+  // lança SecurityError e derrubava a tela de login, por isso o try/catch.
+  window.addEventListener("load", function () {
+    try {
+      if (!("serviceWorker" in navigator)) return;
+      var sw = navigator.serviceWorker;
+      if (!sw || typeof sw.register !== "function") return;
+      sw.register("pwabuilder-sw.js").catch(function () {});
+    } catch (e) {}
+  });
 </script>
 </body>
 </html>
