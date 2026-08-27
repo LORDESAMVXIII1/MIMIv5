@@ -1599,7 +1599,7 @@
 // index.html novo tem que vir junto com um version.json com o MESMO
 // valor de APP_VERSION abaixo. Os dois sobem juntos no GitHub Pages,
 // lado a lado, na mesma pasta.
-var APP_VERSION = "2026.08.26.6";
+var APP_VERSION = "2026.08.26.7";
 
 // Compara a versão rodando agora com a que está publicada em version.json
 // (arquivo pequeno e rápido de checar, ao lado do index.html — checar um
@@ -20691,6 +20691,14 @@ function checkAgeVerificationLinkFromUrl() {
           runMessageCleanup(); // 1ª limpeza de mensagens com +3 dias, já com as conversas carregadas
         }).catch(function(){});
         startMessageCleanupSchedule(); // repete a cada 1h enquanto o app estiver aberto
+
+        // ── Vibes: pré-carrega em segundo plano ───────────────
+        // Mesmo motivo do onAuthSuccess: este é o caminho de boot usado toda
+        // vez que o app abre com uma sessão já salva (o caso mais comum),
+        // então sem essa mesma linha aqui a Vibes continuava só começando a
+        // buscar quando a aba era aberta. Não mexe em ranking/filtro/
+        // diversidade — só adianta o início da mesma busca de sempre.
+        if (state.user && !VibesModule._userLoaded) VibesModule.loadUserVibes();
 
         // ── 3. Presença online ────────────────────────────────
         startPresence();
