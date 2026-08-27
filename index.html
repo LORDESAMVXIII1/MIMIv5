@@ -4162,7 +4162,7 @@ var APP_VERSION = "2026.08.27.1";
     } catch (e) {}
     Promise.all(jobs)["catch"](function () {})
       .then(function () {
-        setTimeout(function () { window.location.replace(bustedUrl(remoteVersion)); }, 600);
+        setTimeout(function () { window.location.replace(bustedUrl(String(Date.now()))); }, 600);
       });
   }
 
