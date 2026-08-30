@@ -4074,7 +4074,7 @@ var CFG = {
 // Lê /config/app no Firestore (leitura pública) logo no boot. Se
 // maintenanceMode=true OU a versão deste arquivo < minVersion, bloqueia
 // a tela — sem depender de re-upload no GitHub Pages.
-var APP_VERSION = "2026.08.27.1";
+var APP_VERSION = "2026.08.27.2";
 
 // ─── AUTO-ATUALIZAÇÃO ───────────────────────────────────────
 // Problema antigo: depois de subir um index.html novo no GitHub Pages,
@@ -6824,6 +6824,7 @@ var FB = {
       // + moderação (3.1): esconde posts removidos/em revisão de OUTROS
       // usuários, mas o autor continua vendo o próprio post (senão ele
       // "sumiria" sem explicação assim que fosse denunciado).
+      var _rawMine = fsPosts.filter(function(p){ return p.authorId === ME_ID; }).length;
       posts = fsPosts.filter(function(p) {
         if (!p.authorId || p.authorId === "usuario") return false;
         if (p.moderationStatus === "removed" || p.moderationStatus === "under_review") {
@@ -6831,10 +6832,18 @@ var FB = {
         }
         return true;
       });
+      var _finalMine = posts.filter(function(p){ return p.authorId === ME_ID; }).length;
       cachePostsSnapshot(posts);
       // TEMP DEBUG: confirmar no DevTools se a lista realmente veio vazia do Firestore.
       // Remover depois de confirmar.
       console.log("[DEBUG loadPosts] docs do Firestore:", docs.length, "| posts.length final:", posts.length);
+      // TEMP DEBUG (investigação: próprios posts sumindo do Feed): mostra em
+      // toast (sem precisar de devtools) quantos posts vieram do servidor no
+      // total, quantos são meus, e quantos meus sobraram depois do filtro de
+      // moderação/"usuario". Remover depois de confirmar a causa.
+      if (typeof showToast === "function") {
+        showToast("DEBUG posts — total:" + fsPosts.length + " meus(bruto):" + _rawMine + " meus(final):" + _finalMine, true);
+      }
     }).catch(function(err){
       console.error("loadPosts error:", err);
       var msg = (err && err.message) || "";
@@ -12539,6 +12548,17 @@ function renderFeedPage() {
   '<div style="background:var(--surface);border-bottom:1px solid var(--border);padding-top:12px;">' + renderStories() + '</div>' +
   '<div data-feed-posts>';
   var _feedOrdered = getFeedOrder(posts).filter(function(p) { return FEED_MUSIC_POSTS_ENABLED || !p.audio; });
+  // TEMP DEBUG (investigação: próprios posts sumindo do Feed): dispara só
+  // UMA vez por sessão (flag global), pra não repetir o toast a cada
+  // render. Mostra quantos posts existem em memória (posts), quantos são
+  // meus ali, e quantos meus sobrevivem depois de getFeedOrder (que aplica
+  // isUserBlocked). Remover depois de confirmar a causa.
+  if (!window._debugFeedOrderShown && typeof showToast === "function") {
+    window._debugFeedOrderShown = true;
+    var _dbgMineInMemory = posts.filter(function(p){ return p.authorId === ME_ID; }).length;
+    var _dbgMineInOrdered = _feedOrdered.filter(function(p){ return p.authorId === ME_ID; }).length;
+    showToast("DEBUG feed — posts em memória:" + posts.length + " (meus:" + _dbgMineInMemory + ") | após getFeedOrder:" + _feedOrdered.length + " (meus:" + _dbgMineInOrdered + ") | ME_ID:" + ME_ID, true);
+  }
   var _feedSlice = _feedOrdered.slice(0, state.feedRenderLimit);
   _feedSlice.forEach(function(p) { html += renderPostCard(p); });
   html += '</div>';
@@ -22842,12 +22862,24 @@ var VibesModule = {
     // nessa rodada (fallback pro score global) — a tela não fica esperando.
     ensureMyAffinityLoaded();
     FB.loadVibes().then(function(vibes) {
+      // TEMP DEBUG (investigação: próprias vibes sumindo do Vibes): conta
+      // quantas vibes vieram do servidor (já passadas pelo loadVibes, que
+      // remonta vídeo/filtra moderação) e quantas são minhas, ANTES do
+      // filtro de "não tenho interesse"/bloqueio abaixo. Remover depois de
+      // confirmar a causa.
+      var _rawTotal = vibes.length;
+      var _rawMine = vibes.filter(function(v){ return v.userId === ME_ID; }).length;
       // 2.3 (sinais negativos): tira do feed o que a pessoa já disse que
       // não quer ver — vídeo marcado como "não tenho interesse"/denunciado,
       // ou de alguém que ela bloqueou.
       vibes = vibes.filter(function(v) {
         return !isVibeNotInterested(v.id) && !isUserBlocked(v.userId);
       });
+      var _afterBlockTotal = vibes.length;
+      var _afterBlockMine = vibes.filter(function(v){ return v.userId === ME_ID; }).length;
+      if (typeof showToast === "function") {
+        showToast("DEBUG vibes — servidor:" + _rawTotal + " (minhas:" + _rawMine + ") | após filtro bloqueio/não-interesse:" + _afterBlockTotal + " (minhas:" + _afterBlockMine + ")", true);
+      }
       var affinityMap = _myAffinityCache || {};
       var maxAffinityWatch = _myAffinityMaxWatch || 0;
       // 2.7 (cold start): sem nenhum authorAffinity no cache (já carregado
@@ -22879,6 +22911,13 @@ var VibesModule = {
       vibes = _diversifyByAuthor(vibes, function(v) { return v.userId; }, 2, 6);
       self.vibes = vibes;
       self._loading = false;
+      // TEMP DEBUG (investigação: próprias vibes sumindo do Vibes): resultado
+      // final, depois de ranking + diversificação por autor, que é o que
+      // efetivamente é usado tanto na tela de Vibes quanto no perfil (via
+      // userVibes). Remover depois de confirmar a causa.
+      if (typeof showToast === "function") {
+        showToast("DEBUG vibes — FINAL na tela:" + vibes.length + " (minhas:" + vibes.filter(function(v){ return v.userId === ME_ID; }).length + ") | ME_ID:" + ME_ID, true);
+      }
       render(); // perfil e outras telas também dependem de VibesModule.vibes (ver userVibes)
     }).catch(function(err) {
       console.error("Não foi possível carregar suas vibes:", err);
