@@ -7176,6 +7176,72 @@ var FB = {
     });
   },
 
+  // MIGRAÇÃO ÚNICA (crise de egress do Supabase, set/2026): vibes
+  // antigas de ANTES do fix do Cloudinary ficaram com o vídeo picado em
+  // base64 dentro de "vibeChunks" — cada leitura do feed rebaixa esse
+  // peso todo de novo, o que estourou a cota de egress do plano free.
+  // Isso sobe o vídeo de cada vibe chunked DO PRÓPRIO USUÁRIO LOGADO
+  // pro Cloudinary, atualiza a vibe pra apontar pra lá, e só então
+  // apaga os chunks antigos (Supabase + Firebase, via fsDelete normal).
+  // Roda pelas permissões normais (cada um só migra as PRÓPRIAS vibes,
+  // igual a qualquer edição normal) — sem precisar de segredo de admin.
+  // Rodar uma vez no console (F12) de cada conta que tenha vibe antiga:
+  //   FB.migrateMyChunkedVibes()
+  // Pode rodar de novo à toa: vibe já migrada (chunked:false) não
+  // aparece mais na busca, então não faz nada duas vezes.
+  migrateMyChunkedVibes: function() {
+    if (!_idToken) { console.warn("Faça login primeiro."); return Promise.resolve(); }
+    var preset = cloudinaryWidget.uploadPresets.video;
+    var cloudName = cloudinaryWidget.cloudName;
+
+    function uploadDataUrlToCloudinary(dataUrl) {
+      var form = new FormData();
+      form.append("file", dataUrl);
+      form.append("upload_preset", preset);
+      form.append("cloud_name", cloudName);
+      return fetch("https://api.cloudinary.com/v1_1/" + cloudName + "/video/upload", { method: "POST", body: form })
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+          if (!d.secure_url) return Promise.reject(new Error("Cloudinary não retornou secure_url: " + JSON.stringify(d)));
+          return d.secure_url;
+        });
+    }
+
+    return _fsListMerged("vibes").then(function(all){
+      var mine = (all || []).filter(function(v){ return v.chunked && v.authorId === ME_ID; });
+      console.log("🎬 " + mine.length + " vibe(s) chunked minha(s) pra migrar.");
+      var ok = 0, falhas = 0, semChunks = 0;
+
+      return mine.reduce(function(chain, v){
+        return chain.then(function(){
+          console.log("→ migrando vibe " + v._id + " (\"" + (v.caption || "").slice(0,40) + "\")...");
+          return _fsQueryMerged("vibeChunks", "vibeId", "EQUAL", v._id).then(function(chunks){
+            chunks = (chunks || []).sort(function(a,b){ return (a.index||0)-(b.index||0); });
+            var dataUrl = chunks.map(function(c){ return c.data || ""; }).join("");
+            if (!dataUrl) { console.warn("  sem chunks, pulando."); semChunks++; return; }
+            return uploadDataUrlToCloudinary(dataUrl).then(function(secureUrl){
+              console.log("  ✅ Cloudinary: " + secureUrl);
+              return fsSet("vibes/" + v._id, { videoUrl: secureUrl, chunked: false, chunkCount: null }, true);
+            }).then(function(){
+              return chunks.reduce(function(c2, chunk){
+                return c2.then(function(){ return fsDelete(chunk._path); });
+              }, Promise.resolve());
+            }).then(function(){
+              console.log("  ✅ " + chunks.length + " chunk(s) antigos apagados.");
+              ok++;
+            });
+          }).catch(function(err){
+            falhas++;
+            console.error("  ❌ falhou, seguindo pra próxima:", err && err.message || err);
+          });
+        });
+      }, Promise.resolve()).then(function(){
+        console.log("Migração concluída: " + ok + " ok, " + falhas + " falha(s).");
+        return { total: mine.length, ok: ok, falhas: falhas, semChunks: semChunks };
+      });
+    });
+  },
+
   likeVibe: function(vibeId, liked) {
     if (!_idToken) return Promise.resolve();
     return fsGet("vibes/"+vibeId).then(function(doc){
@@ -20395,6 +20461,20 @@ function renderSettingsPage() {
     '</div>'
   : "") +
 
+  // Corrigir vibes antigas (set/2026: crise de egress do Supabase).
+  // Visível pra QUALQUER conta logada — cada uma só migra as PRÓPRIAS
+  // vibes chunked (se não tiver nenhuma, o botão só mostra "0 vibes").
+  // Só imprime o título "Manutenção" de novo se o dono não já viu (o
+  // bloco do backfill acima já imprime pra ele).
+  (me.email === "franciscoviei123@gmail.com" ? "" : '<div class="cfg-section-title">Manutenção</div>') +
+  '<div class="cfg-item" data-run-vibe-migration style="cursor:pointer;">' +
+    '<div class="cfg-item-icon" style="background:#fff0f6;">'+icoSvg("share",20,C.accent)+'</div>' +
+    '<div class="grow">' +
+      '<div class="cfg-item-label" data-vibe-migration-label>Corrigir vídeos antigos de vibes</div>' +
+      '<div class="cfg-item-sub" data-vibe-migration-sub>Move vídeos antigos pro Cloudinary pra parar de estourar a cota do Supabase. Só mexe nas suas próprias vibes.</div>' +
+    '</div>' +
+  '</div>' +
+
   // Conta
   '<div class="cfg-section-title">Conta</div>' +
   '<div class="cfg-item danger" data-delete-account>' +
@@ -20490,6 +20570,37 @@ function bindSettingsPage() {
       showToast(toastWithIcon("Backfill falhou. Veja o detalhe em Configurações.", "error"), true);
       backfillBtn.removeAttribute("data-running");
       backfillBtn.style.opacity = "1";
+    });
+  });
+
+  // Corrigir vídeos antigos de vibes (migração chunked → Cloudinary),
+  // rodável do celular pela própria conta logada.
+  var vibeMigrationBtn = appEl.querySelector("[data-run-vibe-migration]");
+  if (vibeMigrationBtn) vibeMigrationBtn.addEventListener("click", function() {
+    if (vibeMigrationBtn.getAttribute("data-running") === "1") return;
+    if (!confirm("Isso vai mover os vídeos das SUAS vibes antigas pro Cloudinary (o vídeo continua existindo, só muda de lugar) e apagar a cópia antiga do banco. Rodar agora?")) return;
+
+    vibeMigrationBtn.setAttribute("data-running", "1");
+    vibeMigrationBtn.style.opacity = "0.6";
+    var labelEl = appEl.querySelector("[data-vibe-migration-label]");
+    var subEl = appEl.querySelector("[data-vibe-migration-sub]");
+    if (labelEl) labelEl.textContent = "Corrigindo… não feche o app";
+    if (subEl) subEl.textContent = "Isso pode levar um tempinho, dependendo de quantos vídeos.";
+
+    FB.migrateMyChunkedVibes().then(function(stats) {
+      if (labelEl) labelEl.textContent = "Corrigir vídeos antigos de vibes";
+      if (subEl) subEl.textContent = stats.total === 0
+        ? "Nenhuma vibe antiga encontrada nesta conta. Nada a fazer."
+        : "Concluído: " + stats.ok + " de " + stats.total + " vibe(s) corrigida(s)" + (stats.falhas ? (", " + stats.falhas + " falharam (toque para tentar de novo)") : ".");
+      vibeMigrationBtn.removeAttribute("data-running");
+      vibeMigrationBtn.style.opacity = "1";
+    }).catch(function(err) {
+      console.error("Erro na migração de vibes:", err);
+      if (labelEl) labelEl.textContent = "Corrigir vídeos antigos de vibes";
+      if (subEl) subEl.textContent = "Falhou: " + ((err && err.message) || JSON.stringify(err)) + ". Toque para tentar de novo.";
+      showToast(toastWithIcon("Correção de vibes falhou. Veja o detalhe em Configurações.", "error"), true);
+      vibeMigrationBtn.removeAttribute("data-running");
+      vibeMigrationBtn.style.opacity = "1";
     });
   });
 
