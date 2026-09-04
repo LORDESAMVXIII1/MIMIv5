@@ -4074,7 +4074,7 @@ var CFG = {
 // Lê /config/app no Firestore (leitura pública) logo no boot. Se
 // maintenanceMode=true OU a versão deste arquivo < minVersion, bloqueia
 // a tela — sem depender de re-upload no GitHub Pages.
-var APP_VERSION = "2026.09.03.2";
+var APP_VERSION = "2026.09.03.3";
 
 // ─── AUTO-ATUALIZAÇÃO ───────────────────────────────────────
 // Problema antigo: depois de subir um index.html novo no GitHub Pages,
@@ -22955,8 +22955,8 @@ var VibesModule = {
       // TEMP DEBUG (investigação: próprias vibes sumindo do Vibes): conta
       // quantas vibes vieram do servidor (já passadas pelo loadVibes, que
       // remonta vídeo/filtra moderação) e quantas são minhas, ANTES do
-      // filtro de "não tenho interesse"/bloqueio abaixo. Remover depois de
-      // confirmar a causa.
+      // filtro de "não tenho interesse"/bloqueio abaixo. Causa confirmada
+      // e corrigida (set/2026) — instrumentação removida.
       var _rawTotal = vibes.length;
       var _rawMine = vibes.filter(function(v){ return v.userId === ME_ID; }).length;
       // 2.3 (sinais negativos): tira do feed o que a pessoa já disse que
@@ -22967,9 +22967,6 @@ var VibesModule = {
       });
       var _afterBlockTotal = vibes.length;
       var _afterBlockMine = vibes.filter(function(v){ return v.userId === ME_ID; }).length;
-      if (typeof showToast === "function") {
-        showToast("DEBUG vibes — servidor:" + _rawTotal + " (minhas:" + _rawMine + ") | após filtro bloqueio/não-interesse:" + _afterBlockTotal + " (minhas:" + _afterBlockMine + ")", true);
-      }
       var affinityMap = _myAffinityCache || {};
       var maxAffinityWatch = _myAffinityMaxWatch || 0;
       // 2.7 (cold start): sem nenhum authorAffinity no cache (já carregado
@@ -23001,13 +22998,8 @@ var VibesModule = {
       vibes = _diversifyByAuthor(vibes, function(v) { return v.userId; }, 2, 6);
       self.vibes = vibes;
       self._loading = false;
-      // TEMP DEBUG (investigação: próprias vibes sumindo do Vibes): resultado
-      // final, depois de ranking + diversificação por autor, que é o que
-      // efetivamente é usado tanto na tela de Vibes quanto no perfil (via
-      // userVibes). Remover depois de confirmar a causa.
-      if (typeof showToast === "function") {
-        showToast("DEBUG vibes — FINAL na tela:" + vibes.length + " (minhas:" + vibes.filter(function(v){ return v.userId === ME_ID; }).length + ") | ME_ID:" + ME_ID, true);
-      }
+      // TEMP DEBUG (investigação: próprias vibes sumindo do Vibes): causa
+      // confirmada e corrigida (set/2026) — instrumentação removida.
       render(); // perfil e outras telas também dependem de VibesModule.vibes (ver userVibes)
     }).catch(function(err) {
       console.error("Não foi possível carregar suas vibes:", err);
