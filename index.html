@@ -4090,7 +4090,7 @@ var CFG = {
 // Lê /config/app no Firestore (leitura pública) logo no boot. Se
 // maintenanceMode=true OU a versão deste arquivo < minVersion, bloqueia
 // a tela — sem depender de re-upload no GitHub Pages.
-var APP_VERSION = "2026.09.04.1";
+var APP_VERSION = "2026.09.04.2";
 
 // ─── AUTO-ATUALIZAÇÃO ───────────────────────────────────────
 // Problema antigo: depois de subir um index.html novo no GitHub Pages,
@@ -20470,6 +20470,20 @@ function renderSettingsPage() {
     '</div>' +
   '</div>' +
 
+  // Diagnóstico (investigação: vibes de um usuário não aparecendo na aba
+  // Vibes). Roda a mesma checagem em 3 etapas que loadVibes() faz por
+  // dentro (docs crus -> remontagem de vídeo -> filtro de moderação),
+  // pra achar em qual etapa exatamente as vibes de alguém estão se
+  // perdendo. Copia o resultado pra área de transferência pra ser colado
+  // em qualquer lugar (ex.: numa conversa de suporte).
+  '<div class="cfg-item" data-run-vibe-diagnostic style="cursor:pointer;">' +
+    '<div class="cfg-item-icon" style="background:#fff0f6;">'+icoSvg("search",20,C.accent)+'</div>' +
+    '<div class="grow">' +
+      '<div class="cfg-item-label" data-vibe-diagnostic-label>Diagnóstico de vibes de um usuário</div>' +
+      '<div class="cfg-item-sub" data-vibe-diagnostic-sub>Verifica quantas vibes de alguém o app está realmente recebendo do banco, pra investigar vídeos que não aparecem.</div>' +
+    '</div>' +
+  '</div>' +
+
   // Conta
   '<div class="cfg-section-title">Conta</div>' +
   '<div class="cfg-item danger" data-delete-account>' +
@@ -20596,6 +20610,99 @@ function bindSettingsPage() {
       showToast(toastWithIcon("Correção de vibes falhou. Veja o detalhe em Configurações.", "error"), true);
       vibeMigrationBtn.removeAttribute("data-running");
       vibeMigrationBtn.style.opacity = "1";
+    });
+  });
+
+  // Diagnóstico de vibes de um usuário (investigação: vibes sumindo da
+  // aba Vibes pra alguns autores). Repete, passo a passo, exatamente o
+  // que FB.loadVibes() faz por dentro pra esse único autor, e mostra em
+  // qual etapa (docs crus / remontagem de vídeo / moderação) a
+  // quantidade cai — sem precisar de console do navegador.
+  var vibeDiagBtn = appEl.querySelector("[data-run-vibe-diagnostic]");
+  if (vibeDiagBtn) vibeDiagBtn.addEventListener("click", function() {
+    if (vibeDiagBtn.getAttribute("data-running") === "1") return;
+    var query = (prompt("Usuário pra diagnosticar (nome ou @usuário, sem arroba):") || "").trim();
+    if (!query) return;
+
+    vibeDiagBtn.setAttribute("data-running", "1");
+    vibeDiagBtn.style.opacity = "0.6";
+    var labelEl = appEl.querySelector("[data-vibe-diagnostic-label]");
+    var subEl = appEl.querySelector("[data-vibe-diagnostic-sub]");
+    if (labelEl) labelEl.textContent = "Diagnosticando…";
+    if (subEl) subEl.textContent = "Consultando o banco, um instante.";
+
+    var qLower = query.toLowerCase().replace(/^@/, "");
+    var target = Object.keys(USERS).map(function(id){ return USERS[id] && Object.assign({}, USERS[id], {_id:id}); }).find(function(u){
+      return u && ((u.username||"").toLowerCase() === qLower || (u.name||"").toLowerCase().indexOf(qLower) !== -1);
+    });
+
+    function finish(text) {
+      if (labelEl) labelEl.textContent = "Diagnóstico de vibes de um usuário";
+      if (subEl) subEl.textContent = "Verifica quantas vibes de alguém o app está realmente recebendo do banco, pra investigar vídeos que não aparecem.";
+      vibeDiagBtn.removeAttribute("data-running");
+      vibeDiagBtn.style.opacity = "1";
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function(){
+          showToast(toastWithIcon("Diagnóstico copiado! Cola onde precisar.", "success", "before"), true);
+        }).catch(function(){ prompt("Não deu pra copiar sozinho — selecione tudo abaixo e copie:", text); });
+      } else {
+        prompt("Selecione tudo abaixo e copie:", text);
+      }
+    }
+
+    if (!target) {
+      vibeDiagBtn.removeAttribute("data-running");
+      vibeDiagBtn.style.opacity = "1";
+      if (labelEl) labelEl.textContent = "Diagnóstico de vibes de um usuário";
+      if (subEl) subEl.textContent = "Verifica quantas vibes de alguém o app está realmente recebendo do banco, pra investigar vídeos que não aparecem.";
+      showToast(toastWithIcon("Não achei ninguém com esse nome/usuário.", "warning", "before"), true);
+      return;
+    }
+
+    _fsListMerged("vibes").then(function(all){
+      var mine = (all || []).filter(function(v){ return v.authorId === target._id; });
+      var chunkedTrue = mine.filter(function(v){ return v.chunked; });
+      var chunkedFalse = mine.filter(function(v){ return !v.chunked; });
+      var report = [];
+      report.push("Diagnóstico de vibes — " + (target.name || target.username || target._id) + " (id " + target._id + ")");
+      report.push("ME_ID (conta logada agora): " + ME_ID);
+      report.push("");
+      report.push("1) Docs 'vibes' no banco (raw): " + mine.length + " de " + all.length + " no total");
+      report.push("   chunked:true (não migradas ou migração não salvou): " + chunkedTrue.length);
+      report.push("   chunked:false (migradas ou sempre diretas): " + chunkedFalse.length);
+
+      return Promise.all(mine.map(function(d){
+        if (!d.chunked) return d;
+        return _fsQueryMerged("vibeChunks","vibeId","EQUAL",d._id).then(function(chunks){
+          d._chunkCount = (chunks||[]).length;
+          d.videoUrl = (chunks||[]).map(function(c){ return c.data||""; }).join("");
+          return d;
+        });
+      })).then(function(full){
+        var comVideo = full.filter(function(d){ return !!d.videoUrl; });
+        var semVideo = full.filter(function(d){ return !d.videoUrl; });
+        report.push("");
+        report.push("2) Depois de remontar vídeo: com videoUrl: " + comVideo.length + " | SEM videoUrl: " + semVideo.length);
+        if (semVideo.length) {
+          report.push("   Perdidas aqui (id / chunkCount esperado / chunks achados):");
+          semVideo.forEach(function(d){ report.push("   - " + d._id + " / " + d.chunkCount + " / " + d._chunkCount); });
+        }
+
+        var moderadas = comVideo.filter(function(d){
+          if (d.moderationStatus === "removed" || d.moderationStatus === "under_review") return d.authorId === ME_ID;
+          return true;
+        });
+        report.push("");
+        report.push("3) Depois do filtro de moderação: " + moderadas.length);
+        report.push("");
+        report.push(moderadas.length === mine.length
+          ? "Resultado: todas as vibes chegam inteiras até o fim — se ainda não aparecem na tela, é questão de ordenação/scroll na aba Vibes, não de dado faltando."
+          : "Resultado: " + (mine.length - moderadas.length) + " vibe(s) estão se perdendo em algum passo acima — veja em qual etapa o número caiu.");
+        finish(report.join("\n"));
+      });
+    }).catch(function(err){
+      console.error("Erro no diagnóstico de vibes:", err);
+      finish("Diagnóstico falhou: " + ((err && err.message) || JSON.stringify(err)));
     });
   });
 
