@@ -3150,14 +3150,22 @@ function meRefresh() { ME = USERS[ME_ID]; }
 // conteúdo pros dois lados, não só pra quem apertou o botão.
 var BLOCKED_USERS = {};
 var BLOCKED_BY_OTHERS = {};
+// FIX (set/2026): a chave do localStorage era fixa ("mimi_blocked_users"),
+// igual pra qualquer conta logada no mesmo aparelho/navegador. Resultado:
+// bloquear alguém numa conta de teste fazia esse bloqueio "vazar" e ser
+// migrado pro Firestore de QUALQUER outra conta nova logada depois no
+// mesmo aparelho (ver loadMyBlockLists abaixo), escondendo o autor pra
+// todo mundo menos ele mesmo. Agora a chave inclui o ME_ID, então cada
+// conta só lê/escreve o próprio bloqueio local.
+function _blockedStorageKey() { return "mimi_blocked_users_" + (ME_ID || "anon"); }
 (function() {
-  try { BLOCKED_USERS = JSON.parse(localStorage.getItem("mimi_blocked_users") || "{}"); } catch(e) { BLOCKED_USERS = {}; }
+  try { BLOCKED_USERS = JSON.parse(localStorage.getItem(_blockedStorageKey()) || "{}"); } catch(e) { BLOCKED_USERS = {}; }
 })();
 // Bloqueio "meu" (uso interno pra decidir texto/opção de desbloquear nos
 // menus — só quem bloqueou pode desbloquear).
 function iBlockedUser(userId) { return !!BLOCKED_USERS[userId]; }
 function isUserBlocked(userId) { return !!BLOCKED_USERS[userId] || !!BLOCKED_BY_OTHERS[userId]; }
-function saveBlockedUsers() { try { localStorage.setItem("mimi_blocked_users", JSON.stringify(BLOCKED_USERS)); } catch(e){} }
+function saveBlockedUsers() { try { localStorage.setItem(_blockedStorageKey(), JSON.stringify(BLOCKED_USERS)); } catch(e){} }
 function blockUserId(userId) {
   BLOCKED_USERS[userId] = true;
   saveBlockedUsers();
@@ -3172,15 +3180,23 @@ function unblockUserId(userId) {
 }
 // Chamado no login/restauração de sessão: busca do Firestore quem eu
 // bloqueei (fonte de verdade agora, substitui a lista local) e quem me
-// bloqueou. Qualquer bloqueio feito localmente ANTES dessa sincronização
-// existir (só em localStorage, nunca gravado no Firestore) é migrado pra
-// lá agora, pra não se perder e pra passar a valer dos dois lados também.
+// bloqueou.
+// FIX (set/2026): antes, "BLOCKED_USERS = Object.assign({}, BLOCKED_USERS,
+// remoteSet)" mesclava com o que já estivesse em memória — se sobrou
+// bloqueio de OUTRA conta usada antes nesse mesmo aparelho (pela chave
+// antiga, compartilhada), ele era tratado como "bloqueio antigo só local
+// dessa conta" e migrado pro Firestore dela, bloqueando sem querer.
+// Agora zera e recarrega estritamente da chave própria desta conta antes
+// de mesclar com o servidor — nada de outra conta sobrevive à troca.
 function loadMyBlockLists() {
   if (typeof FB === "undefined" || !FB.loadBlockLists) return;
+  try { BLOCKED_USERS = JSON.parse(localStorage.getItem(_blockedStorageKey()) || "{}"); } catch(e) { BLOCKED_USERS = {}; }
   FB.loadBlockLists().then(function(lists) {
     var remoteSet = {};
     lists.iBlocked.forEach(function(id) { remoteSet[id] = true; });
-    // Migra bloqueios antigos (só locais) pro Firestore.
+    // Migra bloqueios feitos offline NESTA MESMA conta (raro, mas possível
+    // se o bloqueio salvou local e a sincronização com o servidor falhou)
+    // — agora seguro porque BLOCKED_USERS só tem o que já era desta conta.
     Object.keys(BLOCKED_USERS).forEach(function(id) {
       if (!remoteSet[id]) FB.blockUser(id);
     });
@@ -4074,7 +4090,7 @@ var CFG = {
 // Lê /config/app no Firestore (leitura pública) logo no boot. Se
 // maintenanceMode=true OU a versão deste arquivo < minVersion, bloqueia
 // a tela — sem depender de re-upload no GitHub Pages.
-var APP_VERSION = "2026.09.03.3";
+var APP_VERSION = "2026.09.04.1";
 
 // ─── AUTO-ATUALIZAÇÃO ───────────────────────────────────────
 // Problema antigo: depois de subir um index.html novo no GitHub Pages,
