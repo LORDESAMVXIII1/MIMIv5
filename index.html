@@ -4090,7 +4090,7 @@ var CFG = {
 // Lê /config/app no Firestore (leitura pública) logo no boot. Se
 // maintenanceMode=true OU a versão deste arquivo < minVersion, bloqueia
 // a tela — sem depender de re-upload no GitHub Pages.
-var APP_VERSION = "2026.09.04.3";
+var APP_VERSION = "2026.09.05.1";
 
 // ─── AUTO-ATUALIZAÇÃO ───────────────────────────────────────
 // Problema antigo: depois de subir um index.html novo no GitHub Pages,
@@ -5134,9 +5134,19 @@ function fsList(collection) {
 // não pega esse caso, já que a lista não vem vazia, só incompleta).
 // Quando o mesmo _id existe nos dois lados, o do Supabase prevalece
 // (é a fonte mais atual pra escritas novas).
-function _fsListMerged(collection) {
+function _fsListMerged(collection, opts) {
+  // ✅ PAGINAÇÃO REAL (economia de egress, set/2026): quando quem chamou
+  // pediu um "opts.limit" e o mirror já está confirmado como completo
+  // (backfill OK) e o Firebase não está sendo usado como fallback no
+  // momento, não faz sentido buscar o Firebase por INTEIRO só pra
+  // mesclar — isso anularia a economia do limit no Supabase, que é
+  // quem tem a cota de egress apertada. Nesse caso confia só no
+  // Supabase, já paginado no servidor.
+  if (opts && typeof opts.limit === "number" && _isBackfillConfirmed() && !_isFirebaseThrottled() && typeof SupabaseDB !== "undefined") {
+    return SupabaseDB.mirror.list(collection, opts).catch(function(){ return []; });
+  }
   var supaPromise = (typeof SupabaseDB !== "undefined")
-    ? SupabaseDB.mirror.list(collection).catch(function(){ return []; })
+    ? SupabaseDB.mirror.list(collection, opts).catch(function(){ return []; })
     : Promise.resolve([]);
   var firePromise = _isFirebaseThrottled() ? Promise.resolve([]) : _fsListFirebase(collection).catch(function(){ return []; });
   return Promise.all([supaPromise, firePromise]).then(function(results){
@@ -5823,9 +5833,20 @@ var SupabaseDB = (function () {
     },
 
     // Lista os documentos "filhos" de um caminho de coleção
-    // (ex.: "posts" ou "posts/abc123/comments")
-    list: function (collectionPath) {
-      return callGateway({ op: "list", path: collectionPath }).then(function (rows) {
+    // (ex.: "posts" ou "posts/abc123/comments").
+    // ✅ PAGINAÇÃO REAL (economia de egress, set/2026): opts opcional
+    // { limit, before }. O fs-gateway já sabia podar no Postgres antes
+    // de responder (dbListByParent aceita os dois), só faltava o
+    // cliente pedir — sem isso, toda leitura trazia a coleção inteira.
+    // "before" é o valor de created_at (string ISO) do item mais antigo
+    // já recebido, pra buscar a PRÓXIMA página (mais antiga ainda).
+    list: function (collectionPath, opts) {
+      var payload = { op: "list", path: collectionPath };
+      if (opts) {
+        if (typeof opts.limit === "number") payload.limit = opts.limit;
+        if (opts.before) payload.before = opts.before;
+      }
+      return callGateway(payload).then(function (rows) {
         return rows || [];
       });
     },
@@ -7119,12 +7140,33 @@ var FB = {
   },
 
   // Carrega vibes do Firestore, remontando vídeos divididos em partes.
-  // `since` opcional para trazer só as vibes novas desde a última sincronização.
-  loadVibes: function(since) {
+  // `opts` é opcional e tem duas formas:
+  //   - um valor "truthy" simples (string/timestamp) = comportamento antigo
+  //     de "since": só vibes novas depois desse ponto (fsListIncremental).
+  //   - um objeto { limit, before } = paginação real: pede só "limit" vibes
+  //     mais recentes (ou mais antigas que "before", pra próxima página)
+  //     direto do servidor, em vez de trazer a coleção inteira. Sem "opts",
+  //     continua trazendo tudo (usado pelo painel de Moderação e pela
+  //     migração de vibes chunked, que precisam ver o total).
+  loadVibes: function(opts) {
     if (!_idToken) return Promise.resolve([]);
-    var docsPromise = since ? fsListIncremental("vibes", since) : _fsListMerged("vibes");
+    var since = (opts && typeof opts === "object") ? null : opts;
+    var pageOpts = (opts && typeof opts === "object") ? opts : null;
+    var docsPromise = since ? fsListIncremental("vibes", since) : _fsListMerged("vibes", pageOpts);
+    // Cursor de paginação: guardado FORA da promise porque precisa refletir
+    // exatamente o que o servidor devolveu pra este "limit" — depois disso
+    // a lista ainda passa por remontagem de vídeo e filtro de moderação,
+    // que não devem mudar "quantas vibes reais existem antes de 'before'".
+    var _pageInfo = null;
     return docsPromise.then(function(docs){
       docs = docs || [];
+      if (pageOpts && typeof pageOpts.limit === "number") {
+        var oldest = null;
+        docs.forEach(function(d){
+          if (d._createdAt && (!oldest || d._createdAt < oldest)) oldest = d._createdAt;
+        });
+        _pageInfo = { oldestCreatedAt: oldest, hasMore: docs.length >= pageOpts.limit };
+      }
       return Promise.all(docs.map(function(d){
         if (!d.chunked) return d;
         return _fsQueryMerged("vibeChunks","vibeId","EQUAL",d._id).then(function(chunks){
@@ -7145,7 +7187,7 @@ var FB = {
       if (missing > 0 && typeof showToast === "function") {
         showToast(toastWithIcon(missing + " vibe(s) não puderam ser carregadas (vídeo não encontrado).", "warning", "before"), true);
       }
-      return fullDocs.filter(function(d){
+      var result = fullDocs.filter(function(d){
         if (!d.videoUrl) return false;
         if (d.moderationStatus === "removed" || d.moderationStatus === "under_review") {
           return d.authorId === ME_ID;
@@ -7176,6 +7218,12 @@ var FB = {
           avgWatchSeconds: d.watchSamples ? (d.totalWatchSeconds || 0) / d.watchSamples : 0
         };
       });
+      // ✅ Cursor de paginação pendurado no próprio array de retorno (sem
+      // quebrar quem já chama loadVibes() esperando só a lista) — quem
+      // pediu com "opts.limit" acessa result._pageInfo pra saber se tem
+      // mais vibes mais antigas e qual "before" usar na próxima página.
+      result._pageInfo = _pageInfo;
+      return result;
     }).catch(function(err){
       console.error("loadVibes error:", err);
       return Promise.reject(err);
@@ -20444,46 +20492,6 @@ function renderSettingsPage() {
     '</div>'
   : "") +
 
-  // Manutenção (só visível pro dono do app, pra rodar o backfill do celular)
-  (me.email === "franciscoviei123@gmail.com" ?
-    '<div class="cfg-section-title">Manutenção</div>' +
-    '<div class="cfg-item" data-run-backfill style="cursor:pointer;">' +
-      '<div class="cfg-item-icon" style="background:#fff0f6;">'+icoSvg("share",20,C.accent)+'</div>' +
-      '<div class="grow">' +
-        '<div class="cfg-item-label" data-backfill-label>Sincronizar backup (Supabase)</div>' +
-        '<div class="cfg-item-sub" data-backfill-sub>Copia perfis, posts, seguidores, stories, conversas etc. pro espelho. Rode com o Firebase normal, uma vez.</div>' +
-      '</div>' +
-    '</div>'
-  : "") +
-
-  // Corrigir vibes antigas (set/2026: crise de egress do Supabase).
-  // Visível pra QUALQUER conta logada — cada uma só migra as PRÓPRIAS
-  // vibes chunked (se não tiver nenhuma, o botão só mostra "0 vibes").
-  // Só imprime o título "Manutenção" de novo se o dono não já viu (o
-  // bloco do backfill acima já imprime pra ele).
-  (me.email === "franciscoviei123@gmail.com" ? "" : '<div class="cfg-section-title">Manutenção</div>') +
-  '<div class="cfg-item" data-run-vibe-migration style="cursor:pointer;">' +
-    '<div class="cfg-item-icon" style="background:#fff0f6;">'+icoSvg("share",20,C.accent)+'</div>' +
-    '<div class="grow">' +
-      '<div class="cfg-item-label" data-vibe-migration-label>Corrigir vídeos antigos de vibes</div>' +
-      '<div class="cfg-item-sub" data-vibe-migration-sub>Move vídeos antigos pro Cloudinary pra parar de estourar a cota do Supabase. Só mexe nas suas próprias vibes.</div>' +
-    '</div>' +
-  '</div>' +
-
-  // Diagnóstico (investigação: vibes de um usuário não aparecendo na aba
-  // Vibes). Roda a mesma checagem em 3 etapas que loadVibes() faz por
-  // dentro (docs crus -> remontagem de vídeo -> filtro de moderação),
-  // pra achar em qual etapa exatamente as vibes de alguém estão se
-  // perdendo. Copia o resultado pra área de transferência pra ser colado
-  // em qualquer lugar (ex.: numa conversa de suporte).
-  '<div class="cfg-item" data-run-vibe-diagnostic style="cursor:pointer;">' +
-    '<div class="cfg-item-icon" style="background:#fff0f6;">'+icoSvg("search",20,C.accent)+'</div>' +
-    '<div class="grow">' +
-      '<div class="cfg-item-label" data-vibe-diagnostic-label>Diagnóstico de vibes de um usuário</div>' +
-      '<div class="cfg-item-sub" data-vibe-diagnostic-sub>Verifica quantas vibes de alguém o app está realmente recebendo do banco, pra investigar vídeos que não aparecem.</div>' +
-    '</div>' +
-  '</div>' +
-
   // Conta
   '<div class="cfg-section-title">Conta</div>' +
   '<div class="cfg-item danger" data-delete-account>' +
@@ -20550,159 +20558,6 @@ function bindSettingsPage() {
       window.location.href = url;
     }).catch(function(err) {
       showToast((err && err.message) || "Verificação de idade indisponível no momento.");
-    });
-  });
-
-
-  // Rodar backfill Firebase → Supabase direto do celular
-  var backfillBtn = appEl.querySelector("[data-run-backfill]");
-  if (backfillBtn) backfillBtn.addEventListener("click", function() {
-    if (backfillBtn.getAttribute("data-running") === "1") return;
-    if (!confirm("Isso vai copiar tudo do Firebase pro backup no Supabase (perfis, posts, seguidores, stories, conversas...). Pode levar um tempinho. Rodar agora?")) return;
-
-    backfillBtn.setAttribute("data-running", "1");
-    backfillBtn.style.opacity = "0.6";
-    var labelEl = appEl.querySelector("[data-backfill-label]");
-    var subEl = appEl.querySelector("[data-backfill-sub]");
-    if (labelEl) labelEl.textContent = "Sincronizando… não feche o app";
-    if (subEl) subEl.textContent = "Isso pode levar de alguns segundos a alguns minutos, dependendo da quantidade de dados.";
-
-    backfillFirebaseToSupabase().then(function(stats) {
-      if (labelEl) labelEl.textContent = "Sincronizar backup (Supabase)";
-      if (subEl) subEl.textContent = "Concluído: " + stats.posts + " posts, " + stats.users + " usuários, " + stats.followerRefs + " seguidores, " + stats.comments + " comentários, " + stats.convos + " conversas.";
-      backfillBtn.removeAttribute("data-running");
-      backfillBtn.style.opacity = "1";
-    }).catch(function(err) {
-      console.error("Erro no backfill:", err);
-      if (labelEl) labelEl.textContent = "Sincronizar backup (Supabase)";
-      if (subEl) subEl.textContent = "Falhou: " + ((err && err.message) || JSON.stringify(err)) + ". Toque para tentar de novo.";
-      showToast(toastWithIcon("Backfill falhou. Veja o detalhe em Configurações.", "error"), true);
-      backfillBtn.removeAttribute("data-running");
-      backfillBtn.style.opacity = "1";
-    });
-  });
-
-  // Corrigir vídeos antigos de vibes (migração chunked → Cloudinary),
-  // rodável do celular pela própria conta logada.
-  var vibeMigrationBtn = appEl.querySelector("[data-run-vibe-migration]");
-  if (vibeMigrationBtn) vibeMigrationBtn.addEventListener("click", function() {
-    if (vibeMigrationBtn.getAttribute("data-running") === "1") return;
-    if (!confirm("Isso vai mover os vídeos das SUAS vibes antigas pro Cloudinary (o vídeo continua existindo, só muda de lugar) e apagar a cópia antiga do banco. Rodar agora?")) return;
-
-    vibeMigrationBtn.setAttribute("data-running", "1");
-    vibeMigrationBtn.style.opacity = "0.6";
-    var labelEl = appEl.querySelector("[data-vibe-migration-label]");
-    var subEl = appEl.querySelector("[data-vibe-migration-sub]");
-    if (labelEl) labelEl.textContent = "Corrigindo… não feche o app";
-    if (subEl) subEl.textContent = "Isso pode levar um tempinho, dependendo de quantos vídeos.";
-
-    FB.migrateMyChunkedVibes().then(function(stats) {
-      if (labelEl) labelEl.textContent = "Corrigir vídeos antigos de vibes";
-      if (subEl) subEl.textContent = stats.total === 0
-        ? "Nenhuma vibe antiga encontrada nesta conta. Nada a fazer."
-        : "Concluído: " + stats.ok + " de " + stats.total + " vibe(s) corrigida(s)" + (stats.falhas ? (", " + stats.falhas + " falharam (toque para tentar de novo)") : ".");
-      vibeMigrationBtn.removeAttribute("data-running");
-      vibeMigrationBtn.style.opacity = "1";
-    }).catch(function(err) {
-      console.error("Erro na migração de vibes:", err);
-      if (labelEl) labelEl.textContent = "Corrigir vídeos antigos de vibes";
-      if (subEl) subEl.textContent = "Falhou: " + ((err && err.message) || JSON.stringify(err)) + ". Toque para tentar de novo.";
-      showToast(toastWithIcon("Correção de vibes falhou. Veja o detalhe em Configurações.", "error"), true);
-      vibeMigrationBtn.removeAttribute("data-running");
-      vibeMigrationBtn.style.opacity = "1";
-    });
-  });
-
-  // Diagnóstico de vibes de um usuário (investigação: vibes sumindo da
-  // aba Vibes pra alguns autores). Repete, passo a passo, exatamente o
-  // que FB.loadVibes() faz por dentro pra esse único autor, e mostra em
-  // qual etapa (docs crus / remontagem de vídeo / moderação) a
-  // quantidade cai — sem precisar de console do navegador.
-  var vibeDiagBtn = appEl.querySelector("[data-run-vibe-diagnostic]");
-  if (vibeDiagBtn) vibeDiagBtn.addEventListener("click", function() {
-    if (vibeDiagBtn.getAttribute("data-running") === "1") return;
-    var query = (prompt("Usuário pra diagnosticar (nome ou @usuário, sem arroba):") || "").trim();
-    if (!query) return;
-
-    vibeDiagBtn.setAttribute("data-running", "1");
-    vibeDiagBtn.style.opacity = "0.6";
-    var labelEl = appEl.querySelector("[data-vibe-diagnostic-label]");
-    var subEl = appEl.querySelector("[data-vibe-diagnostic-sub]");
-    if (labelEl) labelEl.textContent = "Diagnosticando…";
-    if (subEl) subEl.textContent = "Consultando o banco, um instante.";
-
-    var qLower = query.toLowerCase().replace(/^@/, "");
-    var target = Object.keys(USERS).map(function(id){ return USERS[id] && Object.assign({}, USERS[id], {_id:id}); }).find(function(u){
-      return u && ((u.username||"").toLowerCase() === qLower || (u.name||"").toLowerCase().indexOf(qLower) !== -1);
-    });
-
-    function finish(text) {
-      if (labelEl) labelEl.textContent = "Diagnóstico de vibes de um usuário";
-      if (subEl) subEl.textContent = "Verifica quantas vibes de alguém o app está realmente recebendo do banco, pra investigar vídeos que não aparecem.";
-      vibeDiagBtn.removeAttribute("data-running");
-      vibeDiagBtn.style.opacity = "1";
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).then(function(){
-          showToast(toastWithIcon("Diagnóstico copiado! Cola onde precisar.", "success", "before"), true);
-        }).catch(function(){ prompt("Não deu pra copiar sozinho — selecione tudo abaixo e copie:", text); });
-      } else {
-        prompt("Selecione tudo abaixo e copie:", text);
-      }
-    }
-
-    if (!target) {
-      vibeDiagBtn.removeAttribute("data-running");
-      vibeDiagBtn.style.opacity = "1";
-      if (labelEl) labelEl.textContent = "Diagnóstico de vibes de um usuário";
-      if (subEl) subEl.textContent = "Verifica quantas vibes de alguém o app está realmente recebendo do banco, pra investigar vídeos que não aparecem.";
-      showToast(toastWithIcon("Não achei ninguém com esse nome/usuário.", "warning", "before"), true);
-      return;
-    }
-
-    _fsListMerged("vibes").then(function(all){
-      var mine = (all || []).filter(function(v){ return v.authorId === target._id; });
-      var chunkedTrue = mine.filter(function(v){ return v.chunked; });
-      var chunkedFalse = mine.filter(function(v){ return !v.chunked; });
-      var report = [];
-      report.push("Diagnóstico de vibes — " + (target.name || target.username || target._id) + " (id " + target._id + ")");
-      report.push("ME_ID (conta logada agora): " + ME_ID);
-      report.push("");
-      report.push("1) Docs 'vibes' no banco (raw): " + mine.length + " de " + all.length + " no total");
-      report.push("   chunked:true (não migradas ou migração não salvou): " + chunkedTrue.length);
-      report.push("   chunked:false (migradas ou sempre diretas): " + chunkedFalse.length);
-
-      return Promise.all(mine.map(function(d){
-        if (!d.chunked) return d;
-        return _fsQueryMerged("vibeChunks","vibeId","EQUAL",d._id).then(function(chunks){
-          d._chunkCount = (chunks||[]).length;
-          d.videoUrl = (chunks||[]).map(function(c){ return c.data||""; }).join("");
-          return d;
-        });
-      })).then(function(full){
-        var comVideo = full.filter(function(d){ return !!d.videoUrl; });
-        var semVideo = full.filter(function(d){ return !d.videoUrl; });
-        report.push("");
-        report.push("2) Depois de remontar vídeo: com videoUrl: " + comVideo.length + " | SEM videoUrl: " + semVideo.length);
-        if (semVideo.length) {
-          report.push("   Perdidas aqui (id / chunkCount esperado / chunks achados):");
-          semVideo.forEach(function(d){ report.push("   - " + d._id + " / " + d.chunkCount + " / " + d._chunkCount); });
-        }
-
-        var moderadas = comVideo.filter(function(d){
-          if (d.moderationStatus === "removed" || d.moderationStatus === "under_review") return d.authorId === ME_ID;
-          return true;
-        });
-        report.push("");
-        report.push("3) Depois do filtro de moderação: " + moderadas.length);
-        report.push("");
-        report.push(moderadas.length === mine.length
-          ? "Resultado: todas as vibes chegam inteiras até o fim — se ainda não aparecem na tela, é questão de ordenação/scroll na aba Vibes, não de dado faltando."
-          : "Resultado: " + (mine.length - moderadas.length) + " vibe(s) estão se perdendo em algum passo acima — veja em qual etapa o número caiu.");
-        finish(report.join("\n"));
-      });
-    }).catch(function(err){
-      console.error("Erro no diagnóstico de vibes:", err);
-      finish("Diagnóstico falhou: " + ((err && err.message) || JSON.stringify(err)));
     });
   });
 
@@ -23025,6 +22880,12 @@ function ensureMyAffinityLoaded() {
   });
 }
 
+// ✅ PAGINAÇÃO REAL DAS VIBES (economia de egress, set/2026): mesmo "20"
+// usado no Feed (state.feedRenderLimit), mas aqui é um limite de verdade
+// pedido ao servidor (fs-gateway → Postgres), não um corte feito depois
+// de já ter baixado tudo.
+var VIBES_PAGE_SIZE = 20;
+
 var VibesModule = {
   vibes: [],
   vibesByUser: {}, // { userId: [vibe1, vibe2, ...] }
@@ -23038,11 +22899,62 @@ var VibesModule = {
   // sem precisar de devtools (você só tem acesso pelo celular). Toggle
   // manual pelo botão 🔧 no canto da tela — tirar depois que confirmar.
 
-  
+  // Estado da paginação real (ver loadUserVibes/loadMoreVibes):
+  // _rawVibes junta TODAS as páginas já buscadas (antes do filtro de
+  // bloqueio/"não tenho interesse"), porque o ranking (score+diversidade)
+  // precisa ser recalculado sobre o conjunto acumulado inteiro a cada
+  // página nova, não só sobre a página mais recente isolada.
+  _rawVibes: [],
+  _oldestVibeCreatedAt: null,
+  _hasMoreVibes: true,
+  _loadingMore: false,
+
   init: function() {
     // Sem vibes de demonstração — a lista começa vazia e é preenchida a
     // partir da conta do usuário (Firestore) em loadUserVibes().
     this.vibes = [];
+  },
+
+  // Filtro de bloqueio/desinteresse + ranking (score + afinidade + cold
+  // start) + diversidade por autor — roda sobre TODO o acumulado (rawList)
+  // toda vez que uma página nova chega, pra manter a ordem consistente em
+  // vez de só grudar a página nova no fim sem reordenar.
+  _processAndSetVibes: function(rawList) {
+    // 2.3 (sinais negativos): tira do feed o que a pessoa já disse que
+    // não quer ver — vídeo marcado como "não tenho interesse"/denunciado,
+    // ou de alguém que ela bloqueou.
+    var vibes = (rawList || []).filter(function(v) {
+      return !isVibeNotInterested(v.id) && !isUserBlocked(v.userId);
+    });
+    var affinityMap = _myAffinityCache || {};
+    var maxAffinityWatch = _myAffinityMaxWatch || 0;
+    // 2.7 (cold start): sem nenhum authorAffinity no cache (já carregado
+    // ou ainda carregando), a pessoa não tem gosto conhecido nessa
+    // rodada — trata como usuário novo pra fins de ranking.
+    var isColdStart = Object.keys(affinityMap).length === 0;
+    var maxRawEngagement = 0;
+    vibes.forEach(function(v) {
+      var raw = _vibeRawEngagement(v);
+      if (raw > maxRawEngagement) maxRawEngagement = raw;
+    });
+    // Ranking real (2.1/2.2) + personalização (2.4) + cold start (2.7):
+    // score híbrido de engajamento × decaimento por idade + boost de
+    // conteúdo novo, multiplicado por afinidade individual (seguir o
+    // autor / tempo já assistido com ele) — antes o mesmo score valia
+    // igual pra todo mundo; agora cada pessoa vê uma ordem diferente.
+    // Pra quem ainda não tem afinidade nenhuma, soma também um boost
+    // proporcional ao quanto aquela vibe já provou ser popular.
+    vibes.sort(function(a, b) {
+      var scoreA = _vibeEngagementScore(a) * _affinityMultiplier(a.userId, affinityMap, maxAffinityWatch) +
+                   _coldStartBoost(_vibeRawEngagement(a), maxRawEngagement, isColdStart);
+      var scoreB = _vibeEngagementScore(b) * _affinityMultiplier(b.userId, affinityMap, maxAffinityWatch) +
+                   _coldStartBoost(_vibeRawEngagement(b), maxRawEngagement, isColdStart);
+      return scoreB - scoreA;
+    });
+    // 2.6 (diversidade): mesmo problema do Feed — sem isso, um autor
+    // com vários vídeos engajados em sequência tomaria conta de um
+    // trecho inteiro do scroll das Vibes.
+    this.vibes = _diversifyByAuthor(vibes, function(v) { return v.userId; }, 2, 6);
   },
 
   loadUserVibes: function() {
@@ -23059,6 +22971,11 @@ var VibesModule = {
       return;
     }
     self._userLoaded = true;
+    // Reinicia a paginação a cada carregamento "do zero" (abertura da aba).
+    self._rawVibes = [];
+    self._oldestVibeCreatedAt = null;
+    self._hasMoreVibes = true;
+    self._loadingMore = false;
     // FIX (percepção de demora vs. Reels): a tela de "Carregando vibes…"
     // bloqueante só faz sentido quando ainda não há nada pra mostrar. Se já
     // existe uma lista carregada antes nesta sessão, mantém ela na tela
@@ -23074,61 +22991,49 @@ var VibesModule = {
     // estiver disponível. Se ainda não chegou, entra sem personalização
     // nessa rodada (fallback pro score global) — a tela não fica esperando.
     ensureMyAffinityLoaded();
-    FB.loadVibes().then(function(vibes) {
-      // TEMP DEBUG (investigação: próprias vibes sumindo do Vibes): conta
-      // quantas vibes vieram do servidor (já passadas pelo loadVibes, que
-      // remonta vídeo/filtra moderação) e quantas são minhas, ANTES do
-      // filtro de "não tenho interesse"/bloqueio abaixo. Causa confirmada
-      // e corrigida (set/2026) — instrumentação removida.
-      var _rawTotal = vibes.length;
-      var _rawMine = vibes.filter(function(v){ return v.userId === ME_ID; }).length;
-      // 2.3 (sinais negativos): tira do feed o que a pessoa já disse que
-      // não quer ver — vídeo marcado como "não tenho interesse"/denunciado,
-      // ou de alguém que ela bloqueou.
-      vibes = vibes.filter(function(v) {
-        return !isVibeNotInterested(v.id) && !isUserBlocked(v.userId);
-      });
-      var _afterBlockTotal = vibes.length;
-      var _afterBlockMine = vibes.filter(function(v){ return v.userId === ME_ID; }).length;
-      var affinityMap = _myAffinityCache || {};
-      var maxAffinityWatch = _myAffinityMaxWatch || 0;
-      // 2.7 (cold start): sem nenhum authorAffinity no cache (já carregado
-      // ou ainda carregando), a pessoa não tem gosto conhecido nessa
-      // rodada — trata como usuário novo pra fins de ranking.
-      var isColdStart = Object.keys(affinityMap).length === 0;
-      var maxRawEngagement = 0;
-      vibes.forEach(function(v) {
-        var raw = _vibeRawEngagement(v);
-        if (raw > maxRawEngagement) maxRawEngagement = raw;
-      });
-      // Ranking real (2.1/2.2) + personalização (2.4) + cold start (2.7):
-      // score híbrido de engajamento × decaimento por idade + boost de
-      // conteúdo novo, multiplicado por afinidade individual (seguir o
-      // autor / tempo já assistido com ele) — antes o mesmo score valia
-      // igual pra todo mundo; agora cada pessoa vê uma ordem diferente.
-      // Pra quem ainda não tem afinidade nenhuma, soma também um boost
-      // proporcional ao quanto aquela vibe já provou ser popular.
-      vibes.sort(function(a, b) {
-        var scoreA = _vibeEngagementScore(a) * _affinityMultiplier(a.userId, affinityMap, maxAffinityWatch) +
-                     _coldStartBoost(_vibeRawEngagement(a), maxRawEngagement, isColdStart);
-        var scoreB = _vibeEngagementScore(b) * _affinityMultiplier(b.userId, affinityMap, maxAffinityWatch) +
-                     _coldStartBoost(_vibeRawEngagement(b), maxRawEngagement, isColdStart);
-        return scoreB - scoreA;
-      });
-      // 2.6 (diversidade): mesmo problema do Feed — sem isso, um autor
-      // com vários vídeos engajados em sequência tomaria conta de um
-      // trecho inteiro do scroll das Vibes.
-      vibes = _diversifyByAuthor(vibes, function(v) { return v.userId; }, 2, 6);
-      self.vibes = vibes;
+    // ✅ PAGINAÇÃO REAL: pede só as VIBES_PAGE_SIZE mais recentes ao
+    // servidor (fs-gateway já poda no Postgres), em vez da coleção
+    // inteira — é isso que reduz o egress do Supabase de verdade.
+    FB.loadVibes({ limit: VIBES_PAGE_SIZE }).then(function(vibes) {
+      var pageInfo = vibes._pageInfo || null;
+      self._oldestVibeCreatedAt = pageInfo ? pageInfo.oldestCreatedAt : null;
+      self._hasMoreVibes = pageInfo ? pageInfo.hasMore : false;
+      self._rawVibes = vibes;
+      self._processAndSetVibes(self._rawVibes);
       self._loading = false;
-      // TEMP DEBUG (investigação: próprias vibes sumindo do Vibes): causa
-      // confirmada e corrigida (set/2026) — instrumentação removida.
       render(); // perfil e outras telas também dependem de VibesModule.vibes (ver userVibes)
     }).catch(function(err) {
       console.error("Não foi possível carregar suas vibes:", err);
       showToast(toastWithIcon("Não foi possível carregar suas vibes agora.", "warning", "before"), true);
       self._loading = false;
       self._userLoaded = false; // permite tentar novamente ao reabrir a aba
+    });
+  },
+
+  // ✅ "Página seguinte" das vibes (rolagem infinita de verdade): busca só
+  // as próximas VIBES_PAGE_SIZE vibes mais antigas que o cursor guardado
+  // da última página, reaproveitando o que já está em memória (_rawVibes)
+  // em vez de recarregar tudo do zero. Chamada quando o usuário chega
+  // perto do fim da lista carregada (ver observer em bindEvents).
+  loadMoreVibes: function() {
+    var self = this;
+    if (!_idToken || self._loadingMore || !self._hasMoreVibes || !self._oldestVibeCreatedAt) return;
+    self._loadingMore = true;
+    FB.loadVibes({ limit: VIBES_PAGE_SIZE, before: self._oldestVibeCreatedAt }).then(function(vibes) {
+      var pageInfo = vibes._pageInfo || null;
+      self._oldestVibeCreatedAt = pageInfo ? pageInfo.oldestCreatedAt : self._oldestVibeCreatedAt;
+      self._hasMoreVibes = pageInfo ? pageInfo.hasMore : false;
+      // Junta com o que já tinha, sem duplicar (mesma vibe não deve
+      // aparecer em duas páginas, mas confere pelo id por segurança).
+      var seen = {};
+      self._rawVibes.forEach(function(v){ seen[v.id] = true; });
+      vibes.forEach(function(v){ if (!seen[v.id]) self._rawVibes.push(v); });
+      self._processAndSetVibes(self._rawVibes);
+      self._loadingMore = false;
+      render();
+    }).catch(function(err) {
+      console.warn("Não foi possível carregar mais vibes:", err && err.message || err);
+      self._loadingMore = false;
     });
   },
 
@@ -23667,6 +23572,13 @@ var VibesModule = {
                     nextVideo.src = pendingSrc;
                     nextVideo.load();
                   }
+                }
+                // ✅ PAGINAÇÃO REAL: perto do fim da página já carregada,
+                // busca a próxima leva de vibes mais antigas (real, no
+                // servidor) — mesma ideia do sentinel do Feed, mas aqui
+                // acionada pelo próprio observer de foco que já existia.
+                if (self.vibes && self._activeVibeIdx >= self.vibes.length - 3) {
+                  self.loadMoreVibes();
                 }
               }
               video.muted = false; // tenta tocar com som, igual ao player do Feed
