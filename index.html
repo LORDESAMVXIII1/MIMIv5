@@ -4090,7 +4090,7 @@ var CFG = {
 // Lê /config/app no Firestore (leitura pública) logo no boot. Se
 // maintenanceMode=true OU a versão deste arquivo < minVersion, bloqueia
 // a tela — sem depender de re-upload no GitHub Pages.
-var APP_VERSION = "2026.09.04.2";
+var APP_VERSION = "2026.09.04.3";
 
 // ─── AUTO-ATUALIZAÇÃO ───────────────────────────────────────
 // Problema antigo: depois de subir um index.html novo no GitHub Pages,
@@ -23637,6 +23637,23 @@ var VibesModule = {
           var vibe = (idx !== null && self.vibes) ? self.vibes[idx] : null;
           if (video && typeof video.play === "function") {
             if (entry.isIntersecting) {
+              // ✅ FIX (vibes "sumindo" — investigação set/2026): antes só a
+              // vibe SEGUINTE recebia o src de verdade quando a atual ficava
+              // ativa. Um scroll rápido (pulando mais de uma vibe de vez, bem
+              // comum no celular) ou qualquer render() geral do app no meio
+              // do caminho podia deixar a vibe em que a pessoa parou sem
+              // nunca ter recebido esse empurrão — ficava com data-src pra
+              // sempre (tela preta, parecendo que a vibe sumiu). Agora a
+              // própria vibe que está entrando na tela garante o próprio
+              // carregamento, não só empurra o carregamento pra próxima.
+              if (!video.getAttribute("src")) {
+                var ownPendingSrc = video.getAttribute("data-src");
+                if (ownPendingSrc) {
+                  video.preload = "auto";
+                  video.src = ownPendingSrc;
+                  video.load();
+                }
+              }
               // Vibe atual "oficialmente" em foco — guarda o índice (sobrevive
               // a re-renders, ver renderPage) e acende o src real só da
               // próxima vibe adjacente, que até aqui só tinha data-src.
